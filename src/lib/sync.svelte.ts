@@ -75,7 +75,6 @@ async function resync() {
 
 async function gotAttachment(r: RecordModel) {
 	const href = pb!.files.getURL(r, r.file);
-	attachments.set(r.path, href);
 	if (desktop && !(await hasFile(r.path))) {
 		const res = await fetch(href);
 		if (res.ok) await writeAttachment(r.path, new Uint8Array(await res.arrayBuffer()));
@@ -93,6 +92,7 @@ async function start() {
 		pb.realtime.unsubscribe().catch(() => {});
 		throw e;
 	}
+	attachments.set(r.path, href); // after the download, so desktop images waiting on it reload from disk
 }
 
 async function subscribe() {
@@ -164,5 +164,8 @@ export async function saveAttachment(file: File) {
 	return rel;
 }
 
-// URL to show/open a vault-relative attachment.
-export const fileUrl = (rel: string) => (desktop ? convertFileSrc(`${db.vault}/${rel}`) : (attachments.get(rel) ?? rel));
+// URL to show/open a vault-relative attachment; reactive, so callers in an effect update when it syncs in.
+export const fileUrl = (rel: string) => {
+	const href = attachments.get(rel);
+	return desktop ? convertFileSrc(`${db.vault}/${rel}`) : (href ?? rel);
+};
