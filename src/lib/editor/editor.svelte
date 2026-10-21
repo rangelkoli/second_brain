@@ -44,10 +44,20 @@
 
 	// Vault-relative image paths render from the vault (desktop) or the server (web); markdown keeps the relative path.
 	const isExternal = (src: string) => /^[a-z][\w+.-]*:/i.test(src);
+	const imageSrc = (src: string | null) => (src && !isExternal(src) ? fileUrl(decodeURI(src)) : src);
 	const VaultImage = Image.extend({
 		renderHTML({ HTMLAttributes: a }) {
-			const src = a.src && !isExternal(a.src) ? fileUrl(decodeURI(a.src)) : a.src;
-			return ["img", mergeAttributes(a, { src, loading: "lazy" })];
+			return ["img", mergeAttributes(a, { src: imageSrc(a.src), loading: "lazy" })];
+		},
+		// A note can sync before its image does, so the src re-resolves once the attachment arrives.
+		addNodeView: () => ({ HTMLAttributes: a }) => {
+			const dom = document.createElement("img");
+			for (const [k, v] of Object.entries(a)) if (v != null && k !== "src") dom.setAttribute(k, v);
+			dom.loading = "lazy";
+			const destroy = $effect.root(() => {
+				$effect(() => void (dom.src = imageSrc(a.src) ?? ""));
+			});
+			return { dom, destroy };
 		},
 	});
 
