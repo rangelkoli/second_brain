@@ -27,7 +27,7 @@ Set `VITE_PB_URL` in `.env.local` (see `.env.example`) to your server, then `npm
 
 ## Trainer
 
-**Trainer** in the sidebar (`/learn`) teaches a topic with Gemini (`gemini-4-hydrogen`) using evidence-based study methods: short chunks, a retrieval question after each one, spaced and interleaved quizzing, and a Feynman check. Take notes in your own words next to the lesson and sketch on the whiteboard; the trainer sees both on every turn, and **Review my notes & whiteboard** asks for specific feedback. **Schedule reviews** adds review to-dos 1, 3, 7 and 21 days out.
+**Trainer** in the sidebar (`/learn`) teaches a topic with Gemini (`gemini-4-hydrogen`) using evidence-based study methods: short chunks, a retrieval question after each one, spaced and interleaved quizzing, and a Feynman check. Alongside **Notes** and the **Whiteboard**, a narrated **Lab** tab renders interactive step-by-step visuals across 7 modes (Web Audio piano/drums, geometry diagrams, algorithm steppers, projectile physics, pronunciation cards, annotated Wikimedia photos, and sandboxed HTML/SVG sketches) with inline quick checks. `/learn` also includes **Skill Trees** (built-in and AI-generated paths) and background session generation. The trainer sees your notes, active lab, and whiteboard on every turn; **Review my notes & whiteboard** asks for specific feedback, and **Schedule reviews** adds review to-dos 1, 3, 7 and 21 days out.
 
 Replies are kept short (about 60 words) and in plain language. **Voice on** reads each reply aloud (`gemini-3.8-flash-tts`), **Listen** replays one, and the mic button lets you answer out loud (`gemini-3.5-transcribe`): tap it, talk, tap **Done**. The desktop app asks for microphone access the first time.
 

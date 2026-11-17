@@ -1,6 +1,6 @@
 import { speech, transcribe } from "./trainer.svelte";
 
-// Push-to-talk recording and spoken replies for the trainer.
+// Push-to-talk recording and spoken replies for the trainer + step narration in LabPlayer.
 // ponytail: record-then-transcribe, not streaming; switch to the Live API if latency matters.
 
 const KEY = "trainer-voice";
@@ -13,8 +13,8 @@ export const voice = $state({
 	on: saved, // read new replies aloud
 	recording: false,
 	transcribing: false,
-	loading: -1, // message index whose audio is being generated
-	speaking: -1, // message index currently playing
+	loading: -1 as number | string, // message index or "lab" whose audio is being generated
+	speaking: -1 as number | string, // message index or "lab" currently playing
 });
 
 export function toggleVoice() {
@@ -38,7 +38,7 @@ export function stopSpeaking() {
 	voice.speaking = voice.loading = -1;
 }
 
-export async function speak(index: number, text: string) {
+export async function speak(index: number | string, text: string, onDone?: () => void) {
 	stopSpeaking();
 	const mine = turn;
 	voice.loading = index;
@@ -52,7 +52,12 @@ export async function speak(index: number, text: string) {
 		const src = await url;
 		if (mine !== turn) return;
 		audio = new Audio(src);
-		audio.onended = () => mine === turn && (voice.speaking = -1);
+		audio.onended = () => {
+			if (mine === turn) {
+				voice.speaking = -1;
+				onDone?.();
+			}
+		};
 		voice.loading = -1;
 		voice.speaking = index;
 		await audio.play();

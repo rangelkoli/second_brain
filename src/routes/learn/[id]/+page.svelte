@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
+	import { goto } from "$app/navigation";
 	import { page } from "$app/state";
 	import Editor from "$lib/editor/editor.svelte";
 	import Whiteboard from "$lib/trainer/whiteboard.svelte";
+	import LabPlayer from "$lib/trainer/labs/LabPlayer.svelte";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Textarea } from "$lib/components/ui/textarea/index.js";
 	import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -16,32 +18,81 @@
 	import Volume2 from "@lucide/svelte/icons/volume-2";
 	import VolumeOff from "@lucide/svelte/icons/volume-off";
 	import Play from "@lucide/svelte/icons/play";
+	import Sparkles from "@lucide/svelte/icons/sparkles";
+	import Music from "@lucide/svelte/icons/music";
+	import Code2 from "@lucide/svelte/icons/code-2";
+	import Triangle from "@lucide/svelte/icons/triangle";
+	import Atom from "@lucide/svelte/icons/atom";
+	import Cpu from "@lucide/svelte/icons/cpu";
+	import Languages from "@lucide/svelte/icons/languages";
+	import Compass from "@lucide/svelte/icons/compass";
+	import GitFork from "@lucide/svelte/icons/git-fork";
 	import { noteByPath, updateNote } from "$lib/store.svelte";
-	import { ask, gemini, getSession, scheduleReviews, send, toHtml } from "$lib/trainer/trainer.svelte";
+	import { inferSubjectTheme, type Lab } from "$lib/trainer/lab";
+	import {
+		ask,
+		errors,
+		gemini,
+		getSession,
+		latestLab,
+		pending,
+		scheduleReviews,
+		send,
+		startSession,
+		toHtml,
+	} from "$lib/trainer/trainer.svelte";
 	import { voice, toggleVoice, speak, stopSpeaking, startRecording, stopRecording } from "$lib/trainer/voice.svelte";
 
 	const id = $derived(page.params.id!);
 	const s = $derived(getSession(id));
 	const note = $derived(s && noteByPath(s.note));
+	const busy = $derived(Boolean(pending[id]));
+	const theme = $derived(s ? inferSubjectTheme(s.topic) : "general");
 
-	let tab = $state<"notes" | "board">("notes");
+	let tab = $state<"lab" | "notes" | "board">("notes");
 	let text = $state("");
-	let busy = $state(false);
-	let error = $state("");
+	let localErr = $state("");
 	let board = $state<Whiteboard>();
 	let viewport = $state<HTMLElement>();
+	let selectedLab = $state<Lab | null>(null);
+	let unseenLab = $state(false);
+
+	const error = $derived(localErr || errors[id] || "");
+	const activeLab = $derived(selectedLab ?? (s ? latestLab(s) : undefined));
+
+	// Reset selected lab when switching sessions; show Lab tab first if a session already has a lab and no notes.
+	let prevSessionId = "";
+	$effect(() => {
+		if (id !== prevSessionId) {
+			prevSessionId = id;
+			selectedLab = null;
+			unseenLab = false;
+			localErr = "";
+			const hasLab = s ? Boolean(latestLab(s)) : false;
+			tab = hasLab ? "lab" : "notes";
+		}
+	});
 
 	async function run() {
 		if (!s || busy) return;
-		busy = true;
-		error = "";
+		localErr = "";
+		const targetSession = s;
+		const targetId = s.id;
 		try {
-			const i = await ask(s, note?.content ?? "", board?.snapshot() ?? null);
-			if (voice.on) listen(i);
+			const i = await ask(targetSession, note?.content ?? "", board?.snapshot() ?? null);
+			if (i < 0) return;
+			const newLab = targetSession.messages[i]?.lab;
+			if (newLab && id === targetId) {
+				selectedLab = newLab;
+				if (tab === "notes" || tab === "board") {
+					// Switch to Lab automatically on the kickoff turn or when user isn't mid-note; otherwise notify gently.
+					if (targetSession.messages.length <= 2) tab = "lab";
+					else unseenLab = true;
+				}
+			}
+			if (voice.on && id === targetId) listen(i);
 		} catch (e) {
-			error = msg(e);
-		} finally {
-			busy = false;
+			if (id === targetId) localErr = msg(e);
 		}
 	}
 	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -50,37 +101,62 @@
 		if (voice.speaking === i || voice.loading === i) return stopSpeaking();
 		speak(i, s!.messages[i].text).catch((e) =>
 			// Browsers block sound until the page has been clicked; the Listen button is that click.
-			(error = e?.name === "NotAllowedError" ? "Tap Listen to hear the reply." : `Couldn't play audio: ${msg(e)}`),
+			(localErr = e?.name === "NotAllowedError" ? "Tap Listen to hear the reply." : `Couldn't play audio: ${msg(e)}`),
 		);
 	}
 
 	// Push-to-talk: first tap starts the mic, second tap transcribes and sends.
 	async function mic() {
-		error = "";
+		localErr = "";
 		try {
 			if (!voice.recording) return await startRecording();
 			const heard = await stopRecording();
 			if (heard) say(heard);
-			else error = "Didn't catch that. Try again.";
+			else localErr = "Didn't catch that. Try again.";
 		} catch (e) {
-			error = e instanceof DOMException && e.name === "NotAllowedError" ? "Microphone access is blocked. Allow it in your browser settings." : msg(e);
+			localErr = e instanceof DOMException && e.name === "NotAllowedError" ? "Microphone access is blocked. Allow it in your browser settings." : msg(e);
 		}
 	}
-	function say(msg: string) {
-		if (!s || busy || !msg.trim()) return;
-		send(s, msg.trim());
+
+	function say(content: string) {
+		if (!s || busy || !content.trim()) return;
+		send(s, content.trim());
 		run();
 	}
+
 	function submit(e: Event) {
 		e.preventDefault();
 		say(text);
 		text = "";
 	}
+
+	function openLab(lab: Lab) {
+		selectedLab = lab;
+		tab = "lab";
+		unseenLab = false;
+	}
+
+	function spawnTopicSession(suggested: string) {
+		const newId = startSession(suggested, "");
+		goto(`/learn/${newId}`);
+	}
+
 	const lastIsUser = $derived(s?.messages.at(-1)?.role === "user");
+
+	const THINKING_LABEL: Record<string, string> = {
+		music: "Composing interactive audio & notation…",
+		code: "Tracing steps & building code lab…",
+		math: "Sketching geometry & math visual…",
+		physics: "Simulating motion & vectors…",
+		electronics: "Wiring interactive circuit sketch…",
+		language: "Preparing pronunciation & practice…",
+		art: "Finding reference visual & callouts…",
+		general: "Trainer is sketching your lesson…",
+	};
 
 	// The kickoff message waits for its first answer.
 	onMount(() => {
-		if (lastIsUser) run();
+		if (lastIsUser && !busy) run();
 		return () => (stopSpeaking(), voice.recording && stopRecording().catch(() => {}));
 	});
 
@@ -124,19 +200,58 @@
 						<!-- eslint-disable-next-line svelte/no-at-html-tags -- schema-filtered via generateHTML -->
 						<div>
 							<div class="prose-editor min-h-0! text-sm leading-6">{@html toHtml(m.text)}</div>
-							<button
-								class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
-								onclick={() => listen(i)}
-							>
-								{#if voice.loading === i}<LoaderCircle class="size-3.5 animate-spin" /> Loading voice…
-								{:else if voice.speaking === i}<Square class="size-3.5" /> Stop
-								{:else}<Play class="size-3.5" /> Listen{/if}
-							</button>
+							<div class="mt-1.5 flex flex-wrap items-center gap-2">
+								<button
+									class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
+									onclick={() => listen(i)}
+								>
+									{#if voice.loading === i}<LoaderCircle class="size-3.5 animate-spin" /> Loading voice…
+									{:else if voice.speaking === i}<Square class="size-3.5" /> Stop
+									{:else}<Play class="size-3.5" /> Listen{/if}
+								</button>
+
+								{#if m.lab}
+									<button
+										type="button"
+										class="bg-muted/60 hover:bg-accent inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
+										onclick={() => openLab(m.lab!)}
+									>
+										<Sparkles class="size-3" /> {m.lab.title}
+									</button>
+								{/if}
+
+								{#if m.topicSuggestion}
+									<button
+										type="button"
+										class="border-primary/40 bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors"
+										onclick={() => spawnTopicSession(m.topicSuggestion!)}
+									>
+										<GitFork class="size-3" /> Start separate session: {m.topicSuggestion}
+									</button>
+								{/if}
+							</div>
 						</div>
 					{/if}
 				{/each}
 				{#if busy}
-					<p class="text-muted-foreground animate-pulse text-sm">Trainer is thinking…</p>
+					<div class="bg-muted/40 text-muted-foreground inline-flex items-center gap-2.5 rounded-lg border px-3 py-2 text-xs">
+						{#if theme === "music"}
+							<Music class="text-primary size-4 animate-bounce" />
+						{:else if theme === "code"}
+							<Code2 class="text-primary size-4 animate-pulse" />
+						{:else if theme === "math"}
+							<Triangle class="text-primary size-4 animate-spin" />
+						{:else if theme === "physics"}
+							<Atom class="text-primary size-4 animate-spin" />
+						{:else if theme === "electronics"}
+							<Cpu class="text-primary size-4 animate-pulse" />
+						{:else if theme === "language"}
+							<Languages class="text-primary size-4 animate-pulse" />
+						{:else}
+							<Compass class="text-primary size-4 animate-spin" />
+						{/if}
+						<span>{THINKING_LABEL[theme] ?? THINKING_LABEL.general}</span>
+					</div>
 				{:else if error}
 					<div class="text-destructive flex items-center gap-2 text-sm">
 						{error}
@@ -180,13 +295,40 @@
 			</div>
 		</section>
 
-		<!-- Learner's workspace: both stay mounted so switching tabs keeps the canvas. -->
+		<!-- Learner's workspace: Lab + Notes + Whiteboard stay mounted so switching tabs keeps state. -->
 		<section class="flex h-[80svh] min-h-0 min-w-0 flex-col rounded-xl border lg:h-auto">
-			<div class="flex gap-1 border-b px-2 py-1.5" role="tablist">
+			<div class="flex items-center gap-1 border-b px-2 py-1.5" role="tablist">
+				<Button
+					size="sm"
+					variant={tab === "lab" ? "secondary" : "ghost"}
+					role="tab"
+					aria-selected={tab === "lab"}
+					onclick={() => {
+						tab = "lab";
+						unseenLab = false;
+					}}
+				>
+					<Sparkles class="size-3.5" /> Lab
+					{#if unseenLab && tab !== "lab"}
+						<span class="bg-primary size-1.5 rounded-full"></span>
+					{/if}
+				</Button>
 				<Button size="sm" variant={tab === "notes" ? "secondary" : "ghost"} role="tab" aria-selected={tab === "notes"} onclick={() => (tab = "notes")}>Notes</Button>
 				<Button size="sm" variant={tab === "board" ? "secondary" : "ghost"} role="tab" aria-selected={tab === "board"} onclick={() => (tab = "board")}>Whiteboard</Button>
 				{#if note}<a href="/notes/{note.id}" class="text-muted-foreground hover:text-foreground ml-auto self-center px-2 text-xs underline">Open as note</a>{/if}
 			</div>
+
+			<div class="min-h-0 flex-1 overflow-y-auto p-4" class:hidden={tab !== "lab"}>
+				{#if activeLab}
+					<LabPlayer lab={activeLab} onCheckComplete={(summary) => say(summary)} />
+				{:else}
+					<div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-center text-sm">
+						<Sparkles class="size-6 opacity-40" />
+						<p>Interactive visuals, audio instruments, and step-by-step demos appear here as your trainer explains concepts.</p>
+					</div>
+				{/if}
+			</div>
+
 			<div class="min-h-0 flex-1 overflow-y-auto p-4" class:hidden={tab !== "notes"}>
 				{#if note}
 					{#key note.id}
@@ -196,6 +338,7 @@
 					<p class="text-muted-foreground text-sm">This session's note was renamed or deleted.</p>
 				{/if}
 			</div>
+
 			<div class="min-h-0 flex-1 p-4" class:hidden={tab !== "board"}>
 				{#key id}<Whiteboard bind:this={board} {id} />{/key}
 			</div>
