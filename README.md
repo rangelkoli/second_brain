@@ -29,4 +29,6 @@ Set `VITE_PB_URL` in `.env.local` (see `.env.example`) to your server, then `npm
 
 **Trainer** in the sidebar (`/learn`) teaches a topic with Gemini (`gemini-4-hydrogen`) using evidence-based study methods: short chunks, a retrieval question after each one, spaced and interleaved quizzing, and a Feynman check. Take notes in your own words next to the lesson and sketch on the whiteboard; the trainer sees both on every turn, and **Review my notes & whiteboard** asks for specific feedback. **Schedule reviews** adds review to-dos 1, 3, 7 and 21 days out.
 
+Replies are kept short (about 60 words) and in plain language. **Voice on** reads each reply aloud (`gemini-3.8-flash-tts`), **Listen** replays one, and the mic button lets you answer out loud (`gemini-3.5-transcribe`): tap it, talk, tap **Done**. The desktop app asks for microphone access the first time.
+
 Paste a Gemini API key from [AI Studio](https://aistudio.google.com/apikey) on the Trainer page. It is stored only in that browser's localStorage, never in the build. Session notes are normal synced notes; lesson transcripts and whiteboards stay in the browser.

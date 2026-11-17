@@ -10,8 +10,15 @@
 	import CircleHelp from "@lucide/svelte/icons/circle-help";
 	import CalendarClock from "@lucide/svelte/icons/calendar-clock";
 	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+	import Mic from "@lucide/svelte/icons/mic";
+	import Square from "@lucide/svelte/icons/square";
+	import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+	import Volume2 from "@lucide/svelte/icons/volume-2";
+	import VolumeOff from "@lucide/svelte/icons/volume-off";
+	import Play from "@lucide/svelte/icons/play";
 	import { noteByPath, updateNote } from "$lib/store.svelte";
 	import { ask, gemini, getSession, scheduleReviews, send, toHtml } from "$lib/trainer/trainer.svelte";
+	import { voice, toggleVoice, speak, stopSpeaking, startRecording, stopRecording } from "$lib/trainer/voice.svelte";
 
 	const id = $derived(page.params.id!);
 	const s = $derived(getSession(id));
@@ -29,11 +36,34 @@
 		busy = true;
 		error = "";
 		try {
-			await ask(s, note?.content ?? "", board?.snapshot() ?? null);
+			const i = await ask(s, note?.content ?? "", board?.snapshot() ?? null);
+			if (voice.on) listen(i);
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = msg(e);
 		} finally {
 			busy = false;
+		}
+	}
+	const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+	function listen(i: number) {
+		if (voice.speaking === i || voice.loading === i) return stopSpeaking();
+		speak(i, s!.messages[i].text).catch((e) =>
+			// Browsers block sound until the page has been clicked; the Listen button is that click.
+			(error = e?.name === "NotAllowedError" ? "Tap Listen to hear the reply." : `Couldn't play audio: ${msg(e)}`),
+		);
+	}
+
+	// Push-to-talk: first tap starts the mic, second tap transcribes and sends.
+	async function mic() {
+		error = "";
+		try {
+			if (!voice.recording) return await startRecording();
+			const heard = await stopRecording();
+			if (heard) say(heard);
+			else error = "Didn't catch that. Try again.";
+		} catch (e) {
+			error = e instanceof DOMException && e.name === "NotAllowedError" ? "Microphone access is blocked. Allow it in your browser settings." : msg(e);
 		}
 	}
 	function say(msg: string) {
@@ -49,7 +79,10 @@
 	const lastIsUser = $derived(s?.messages.at(-1)?.role === "user");
 
 	// The kickoff message waits for its first answer.
-	onMount(() => void (lastIsUser && run()));
+	onMount(() => {
+		if (lastIsUser) run();
+		return () => (stopSpeaking(), voice.recording && stopRecording().catch(() => {}));
+	});
 
 	$effect(() => {
 		void s?.messages.length;
@@ -66,6 +99,15 @@
 		<section class="flex h-[80svh] min-h-0 min-w-0 flex-col rounded-xl border lg:h-auto">
 			<header class="flex items-center gap-2 border-b px-4 py-2.5">
 				<h1 class="flex-1 truncate font-semibold">{s.topic}</h1>
+				<Button
+					size="sm"
+					variant={voice.on ? "secondary" : "ghost"}
+					aria-pressed={voice.on}
+					title={voice.on ? "Stop reading replies aloud" : "Read replies aloud"}
+					onclick={toggleVoice}
+				>
+					{#if voice.on}<Volume2 /> Voice on{:else}<VolumeOff /> Voice off{/if}
+				</Button>
 				{#if s.reviews}
 					<span class="text-muted-foreground shrink-0 text-xs" title="Review to-dos on {s.reviews.join(', ')}">Reviews scheduled</span>
 				{:else}
@@ -80,7 +122,17 @@
 						<div class="bg-muted ml-auto w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap">{m.text}</div>
 					{:else}
 						<!-- eslint-disable-next-line svelte/no-at-html-tags -- schema-filtered via generateHTML -->
-						<div class="prose-editor min-h-0! text-sm leading-6">{@html toHtml(m.text)}</div>
+						<div>
+							<div class="prose-editor min-h-0! text-sm leading-6">{@html toHtml(m.text)}</div>
+							<button
+								class="text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1 text-xs"
+								onclick={() => listen(i)}
+							>
+								{#if voice.loading === i}<LoaderCircle class="size-3.5 animate-spin" /> Loading voice…
+								{:else if voice.speaking === i}<Square class="size-3.5" /> Stop
+								{:else}<Play class="size-3.5" /> Listen{/if}
+							</button>
+						</div>
 					{/if}
 				{/each}
 				{#if busy}
@@ -107,10 +159,22 @@
 						bind:value={text}
 						rows={2}
 						class="max-h-40 min-h-0 flex-1 resize-none"
-						placeholder="Answer from memory, or ask a question…"
+						placeholder={voice.recording ? "Listening… tap Done when you're finished" : voice.transcribing ? "Transcribing…" : "Answer from memory, or ask a question…"}
+						disabled={voice.recording || voice.transcribing}
 						aria-label="Message the trainer"
 						onkeydown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), say(text), (text = ""))}
 					/>
+					<Button
+						type="button"
+						size={voice.recording ? "default" : "icon"}
+						variant={voice.recording ? "destructive" : "outline"}
+						disabled={busy || voice.transcribing}
+						aria-label={voice.recording ? "Stop and send" : "Answer by voice"}
+						title={voice.recording ? "Stop and send" : "Answer by voice"}
+						onclick={mic}
+					>
+						{#if voice.transcribing}<LoaderCircle class="animate-spin" />{:else if voice.recording}<span class="size-2 animate-pulse rounded-full bg-current"></span> Done{:else}<Mic />{/if}
+					</Button>
 					<Button type="submit" size="icon" disabled={busy || !text.trim()} aria-label="Send"><ArrowUp /></Button>
 				</form>
 			</div>

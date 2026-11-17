@@ -15,6 +15,8 @@ export type Msg = { role: "user" | "model"; text: string };
 export type Session = { id: string; note: string; topic: string; messages: Msg[]; createdAt: number; reviews?: string[] };
 
 const MODEL = "gemini-4-hydrogen";
+const STT_MODEL = "gemini-3.5-transcribe";
+const TTS_MODEL = "gemini-3.8-flash-tts";
 const KEY = "trainer-gemini-key";
 const SESSIONS = "trainer-sessions";
 
@@ -71,45 +73,86 @@ export function scheduleReviews(s: Session) {
 	save();
 }
 
-const SYSTEM = `You are a tutor inside a note-taking app. Teach with evidence-based learning methods:
-1. Chunking: teach ONE idea at a time in under 150 words, with a concrete example or analogy.
-2. Retrieval practice: end every chunk with ONE question the learner must answer from memory. Never answer it yourself before they try. Prefer "explain why/how" questions over yes/no.
-3. Feedback: when they answer, say plainly what is right, correct any misconception precisely, then move on or ask a short follow-up.
-4. Generative notes: remind them to write the idea in their OWN words in their notes, not copy yours.
-5. Dual coding: when a picture helps (process, structure, relationship), suggest exactly what to sketch on the whiteboard.
-6. Spacing and interleaving: every few chunks, mix in a question about an earlier chunk.
-7. Feynman check: near the end of a topic, ask them to explain it simply, as to a 12-year-old.
+const SYSTEM = `You are a friendly tutor inside a note-taking app. Your replies may be read aloud, so talk like a person, not a textbook.
 
-Each user turn includes the learner's current notes (markdown) and, if they drew anything, a snapshot of their whiteboard image. You can see both. When asked to review them, give specific feedback that quotes or points at their notes/drawing: what is accurate, what is wrong, what is missing, what looks copied rather than in their own words, and ONE concrete improvement. Do not mention the notes or whiteboard otherwise unless something in them is wrong.
+Keep it SHORT and SIMPLE:
+- At most 60 words per reply (reviews: at most 4 short bullets). One idea per reply.
+- Use everyday words a 12-year-old would follow. If you must use a term, explain it in a few words right away.
+- Use one concrete example or analogy instead of abstract explanation.
+- Short sentences. No tables, no long lists, no headings, no code blocks unless the topic is code.
 
-Format in Markdown. Be warm, direct and brief.`;
+How you teach (evidence-based):
+1. Explain one small idea, then ask ONE question they answer from memory. Never answer it yourself before they try. Prefer "why" or "how" questions.
+2. When they answer: say what's right, fix any mistake in one or two sentences, then go on.
+3. Now and then, ask about an earlier idea again (spaced, mixed practice).
+4. When a picture helps, suggest one simple sketch for the whiteboard.
+5. Near the end, ask them to explain the whole thing simply, as if to a friend.
+
+Each user turn includes the learner's current notes (markdown) and, if they drew anything, a snapshot of their whiteboard. You can see both. When asked to review them, point at their actual notes/drawing: what's right, what's wrong, what's missing, and one improvement. Otherwise mention the notes or whiteboard only if something in them is wrong.
+
+Format in light Markdown (bold for key words is fine).`;
+
+async function call(model: string, body: object) {
+	if (!gemini.key) throw new Error("Add your Gemini API key first.");
+	const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+		method: "POST",
+		headers: { "content-type": "application/json", "x-goog-api-key": gemini.key },
+		body: JSON.stringify(body),
+	});
+	const json = await res.json().catch(() => ({}));
+	if (!res.ok) throw new Error(json.error?.message ?? `Gemini error ${res.status}`);
+	return (json.candidates?.[0]?.content?.parts ?? []) as GeminiPart[];
+}
+type GeminiPart = { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string }; audioTranscription?: { text: string } };
 
 export async function ask(s: Session, notes: string, board: string | null) {
-	if (!gemini.key) throw new Error("Add your Gemini API key first.");
 	const contents = s.messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
 	// Only the latest turn carries the notes/whiteboard, so the model always sees their current state.
 	const last = contents.at(-1)!.parts as Record<string, unknown>[];
 	last.push({ text: `--- My notes right now ---\n${notes.trim() || "(empty)"}` });
 	if (board) last.push({ text: "--- My whiteboard right now ---" }, { inlineData: { mimeType: "image/jpeg", data: board.split(",")[1] } });
 
-	const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-		method: "POST",
-		headers: { "content-type": "application/json", "x-goog-api-key": gemini.key },
-		body: JSON.stringify({
-			systemInstruction: { parts: [{ text: SYSTEM }] },
-			contents,
-			generationConfig: { thinkingConfig: { thinkingLevel: "low" } },
-		}),
+	const parts = await call(MODEL, {
+		systemInstruction: { parts: [{ text: SYSTEM }] },
+		contents,
+		generationConfig: { thinkingConfig: { thinkingLevel: "low" } },
 	});
-	const json = await res.json().catch(() => ({}));
-	if (!res.ok) throw new Error(json.error?.message ?? `Gemini error ${res.status}`);
-	const text = (json.candidates?.[0]?.content?.parts ?? [])
-		.filter((p: { thought?: boolean; text?: string }) => !p.thought && p.text)
-		.map((p: { text: string }) => p.text)
+	const text = parts
+		.filter((p) => !p.thought && p.text)
+		.map((p) => p.text)
 		.join("");
 	if (!text) throw new Error("Gemini returned no answer. Try again.");
 	s.messages.push({ role: "model", text });
 	save();
+	return s.messages.length - 1;
+}
+
+const toBase64 = (blob: Blob) =>
+	new Promise<string>((ok, fail) => {
+		const r = new FileReader();
+		r.onload = () => ok(String(r.result).split(",")[1]);
+		r.onerror = () => fail(r.error);
+		r.readAsDataURL(blob);
+	});
+
+/** Speech to text for a recorded clip (webm/opus in Chromium, mp4/aac in Safari and the desktop app). */
+export async function transcribe(audio: Blob) {
+	const mimeType = audio.type.split(";")[0] || "audio/webm";
+	const parts = await call(STT_MODEL, { contents: [{ parts: [{ inlineData: { mimeType, data: await toBase64(audio) } }] }] });
+	return parts.map((p) => p.audioTranscription?.text ?? p.text ?? "").join(" ").trim();
+}
+
+/** Text to speech: returns a playable WAV blob. */
+export async function speech(text: string) {
+	const plain = text.replace(/[*_`#>|]/g, "").replace(/^\s*[-+]\s+/gm, "").trim();
+	const parts = await call(TTS_MODEL, {
+		contents: [{ parts: [{ text: `Say in a warm, clear, unhurried teacher's voice:\n${plain}` }] }],
+		generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Kore" } } } },
+	});
+	const audio = parts.find((p) => p.inlineData)?.inlineData;
+	if (!audio) throw new Error("Gemini returned no audio.");
+	const bytes = Uint8Array.from(atob(audio.data), (c) => c.charCodeAt(0));
+	return new Blob([bytes], { type: audio.mimeType });
 }
 
 export function send(s: Session, text: string) {
