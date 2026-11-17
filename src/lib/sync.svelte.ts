@@ -79,6 +79,7 @@ async function gotAttachment(r: RecordModel) {
 		const res = await fetch(href);
 		if (res.ok) await writeAttachment(r.path, new Uint8Array(await res.arrayBuffer()));
 	}
+	attachments.set(r.path, href); // after the download, so desktop images waiting on it reload from disk
 }
 
 async function start() {
@@ -92,7 +93,6 @@ async function start() {
 		pb.realtime.unsubscribe().catch(() => {});
 		throw e;
 	}
-	attachments.set(r.path, href); // after the download, so desktop images waiting on it reload from disk
 }
 
 async function subscribe() {
