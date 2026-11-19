@@ -18,6 +18,7 @@
 		deleteSession,
 		errors,
 		generateCurriculum,
+		notice,
 		pending,
 		sessionForNode,
 		sessions,
@@ -51,7 +52,7 @@
 	function openNode(node: CurriculumNode) {
 		const existing = sessionForNode(node.id);
 		if (existing) return goto(`/learn/${existing.id}`);
-		goto(`/learn/${startSession(node.prompt, "", { curriculumNodeId: node.id })}`);
+		goto(`/learn/${startSession(node.prompt, "", { curriculumNodeId: node.id, objective: node.summary })}`);
 	}
 
 	async function buildPath(e: Event) {
@@ -81,6 +82,13 @@
 			and sketch on the whiteboard—the trainer reads both and tells you what to fix.
 		</p>
 	</div>
+
+	{#if notice.text}
+		<div role="status" class="text-destructive flex items-center gap-2 rounded-lg border px-3 py-2 text-xs">
+			<span class="flex-1">{notice.text}</span>
+			<button class="underline" onclick={() => (notice.text = "")}>Dismiss</button>
+		</div>
+	{/if}
 
 	{#if !auth.valid}
 		<p class="rounded-lg border p-4 text-sm">

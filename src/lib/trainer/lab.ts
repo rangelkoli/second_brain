@@ -122,6 +122,8 @@ export type TutorReply = {
 	text: string;
 	lab?: Lab;
 	topicSuggestion?: string;
+	check?: { question: string; keyPoints: string[] }; // hidden answer key for the retrieval question asked this turn
+	concepts?: string[];
 };
 
 export type SubjectTheme = "music" | "code" | "math" | "physics" | "electronics" | "language" | "art" | "general";
@@ -320,6 +322,10 @@ export function sanitizeLab(raw: unknown): Lab | undefined {
 	return lab;
 }
 
+const slug = (v: string) => v.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+const strList = (v: unknown, max: number) => [...new Set(asArr<unknown>(v).map((x) => asStr(x).trim()).filter(Boolean))].slice(0, max);
+
+// The tutor call sends TUTOR_SCHEMA, so this only validates; the fence/brace fallback covers schema-less replies.
 export function parseTutorResponse(raw: string): TutorReply {
 	const cleaned = stripJsonFence(raw);
 	if (cleaned.startsWith("{")) {
@@ -327,15 +333,72 @@ export function parseTutorResponse(raw: string): TutorReply {
 			const parsed = JSON.parse(cleaned) as Record<string, unknown>;
 			const text = asStr(parsed.text).trim();
 			if (text) {
-				const lab = sanitizeLab(parsed.lab);
-				const topicSuggestion = asStr(parsed.topicSuggestion).trim() || undefined;
-				return { text, lab, topicSuggestion };
+				const reply: TutorReply = { text, lab: sanitizeLab(parsed.lab), topicSuggestion: asStr(parsed.topicSuggestion).trim() || undefined };
+				const question = asStr(parsed.check_question).trim();
+				const keyPoints = strList(parsed.expected_key_points, 6);
+				if (question && keyPoints.length) reply.check = { question, keyPoints };
+				const concepts = strList(parsed.concept_ids, 6).map(slug).filter(Boolean);
+				if (concepts.length) reply.concepts = concepts;
+				return reply;
 			}
 		} catch {
 			// Fall back to plain text below.
 		}
 	}
 	return { text: raw.trim() };
+}
+
+/** Gemini responseJsonSchema for tutor replies. `lab` stays a free-form object: sanitizeLab validates it. */
+export const TUTOR_SCHEMA = {
+	type: "object",
+	properties: {
+		text: { type: "string", description: "What you say to the learner (light Markdown)." },
+		check_question: { type: "string", description: "The one retrieval question you ask this turn, verbatim. Empty string if you ask none." },
+		expected_key_points: {
+			type: "array",
+			items: { type: "string" },
+			description: "Hidden answer key for check_question: 1-4 short points a correct answer must contain, from the learner's notes when they cover it. Never shown to the learner.",
+		},
+		concept_ids: { type: "array", items: { type: "string" }, description: "1-3 kebab-case slugs for the concepts taught or asked this turn." },
+		// additionalProperties is required: a bare {type:"object"} is decoded as {} (verified on gemini-4-hydrogen).
+		lab: { type: "object", additionalProperties: true, description: "Optional interactive lab, see HOW TO BUILD lab." },
+		topicSuggestion: { type: "string", description: "Optional short title for a separate session when the learner switches to an unrelated topic." },
+	},
+	required: ["text", "check_question", "expected_key_points", "concept_ids"],
+};
+
+/** What the tutor is told about the lab the learner has open: payloads and step captions, never sketch HTML. */
+export function labContext(lab: Lab) {
+	const { id: _id, steps, check, sketch: _sketch, image, ...rest } = lab;
+	return {
+		...rest,
+		steps: steps.map((s) => ({ title: s.title, caption: s.caption })),
+		check: check && { kind: check.kind, prompt: check.prompt },
+		image: image && { query: image.query, annotations: image.annotations.map((a) => a.label) },
+	};
+}
+
+export type Verdict = "correct" | "partial" | "wrong";
+/** Checklist grading: every key point covered = correct, some = partial, none = wrong. */
+export const verdictOf = (keyPoints: string[], covered: string[]): Verdict => {
+	const n = keyPoints.filter((k) => covered.includes(k)).length;
+	return n === keyPoints.length && n > 0 ? "correct" : n ? "partial" : "wrong";
+};
+/** A learner override flips the verdict: "I was right" makes it correct, "I was wrong" makes it wrong. */
+export const effectiveVerdict = (g: { verdict: Verdict; override?: boolean }): Verdict =>
+	g.override ? (g.verdict === "correct" ? "wrong" : "correct") : g.verdict;
+
+// ponytail: "most answers right" stands in for mastery until the learner-model pass (BKT p_mastery) replaces it.
+export const mostlyRight = (verdicts: Verdict[], min = 3) =>
+	verdicts.length >= min && verdicts.filter((v) => v === "correct").length / verdicts.length >= 2 / 3;
+
+/**
+ * Drops old turns in whole blocks (keeping the kickoff) so the request prefix only changes every `block` turns
+ * and Gemini's implicit cache keeps hitting between trims.
+ */
+export function trimHistory<T>(msgs: T[], keep = 40, block = 20): T[] {
+	const drop = Math.max(0, Math.floor((msgs.length - 1 - keep) / block) * block);
+	return drop ? [msgs[0], ...msgs.slice(1 + drop)] : msgs;
 }
 
 const imageCache = new Map<string, { url: string; credit: string } | null>();

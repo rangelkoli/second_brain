@@ -28,6 +28,7 @@ export function toggleVoice() {
 // --- speaking ---
 
 const clips = new Map<string, Promise<string>>(); // reply text -> object URL, so replays are free
+const MAX_CLIPS = 30; // oldest clip's object URL is revoked past this
 let audio: HTMLAudioElement | null = null;
 let turn = 0; // bumps on every play/stop, so a slow TTS response can't start after the user moved on
 
@@ -47,6 +48,11 @@ export async function speak(index: number | string, text: string, onDone?: () =>
 		url = speech(text).then((b) => URL.createObjectURL(b));
 		clips.set(text, url);
 		url.catch(() => clips.delete(text));
+		if (clips.size > MAX_CLIPS) {
+			const [oldest, old] = clips.entries().next().value!;
+			clips.delete(oldest);
+			old.then(URL.revokeObjectURL, () => {});
+		}
 	}
 	try {
 		const src = await url;

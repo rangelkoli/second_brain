@@ -27,26 +27,36 @@
 	import Languages from "@lucide/svelte/icons/languages";
 	import Compass from "@lucide/svelte/icons/compass";
 	import GitFork from "@lucide/svelte/icons/git-fork";
+	import Globe from "@lucide/svelte/icons/globe";
+	import Lightbulb from "@lucide/svelte/icons/lightbulb";
 	import { noteByPath, updateNote } from "$lib/store.svelte";
 	import { auth } from "$lib/sync.svelte";
-	import { inferSubjectTheme, type Lab } from "$lib/trainer/lab";
+	import { effectiveVerdict, inferSubjectTheme, type Lab } from "$lib/trainer/lab";
 	import {
 		ask,
 		errors,
 		getSession,
+		grade,
 		latestLab,
+		notice,
 		pending,
+		priorTries,
+		recordGrade,
 		scheduleReviews,
 		send,
 		startSession,
+		synced,
+		toggleOverride,
 		toHtml,
+		type Session,
 	} from "$lib/trainer/trainer.svelte";
 	import { voice, toggleVoice, speak, stopSpeaking, startRecording, stopRecording } from "$lib/trainer/voice.svelte";
 
 	const id = $derived(page.params.id!);
 	const s = $derived(getSession(id));
 	const note = $derived(s && noteByPath(s.note));
-	const busy = $derived(Boolean(pending[id]));
+	let checking = $state<string | null>(null); // session id whose answer is being graded
+	const busy = $derived(Boolean(pending[id]) || checking === id);
 	const theme = $derived(s ? inferSubjectTheme(s.topic) : "general");
 
 	let tab = $state<"lab" | "notes" | "board">("notes");
@@ -56,6 +66,9 @@
 	let viewport = $state<HTMLElement>();
 	let selectedLab = $state<Lab | null>(null);
 	let unseenLab = $state(false);
+	let grounding = $state(false); // Google Search grounding for the tutor, off by default
+	let input = $state<HTMLTextAreaElement | null>(null);
+	const REVIEW = "Review my notes and whiteboard. What's right, what's wrong, what's missing?";
 
 	const error = $derived(localErr || errors[id] || "");
 	const activeLab = $derived(selectedLab ?? (s ? latestLab(s) : undefined));
@@ -68,18 +81,25 @@
 			selectedLab = null;
 			unseenLab = false;
 			localErr = "";
+			confidence?.resolve(undefined); // leaving mid-prompt counts as skipped
 			const hasLab = s ? Boolean(latestLab(s)) : false;
 			tab = hasLab ? "lab" : "notes";
 		}
 	});
 
-	async function run() {
-		if (!s || busy) return;
+	async function run(targetSession: Session | undefined = s) {
+		if (!targetSession || pending[targetSession.id]) return;
 		localErr = "";
-		const targetSession = s;
-		const targetId = s.id;
+		const targetId = targetSession.id;
+		const here = id === targetId; // notes, board and open lab only belong to the session on screen
 		try {
-			const i = await ask(targetSession, note?.content ?? "", board?.snapshot() ?? null);
+			const i = await ask(targetSession, {
+				notes: here ? (note?.content ?? "") : (noteByPath(targetSession.note)?.content ?? ""),
+				board: here ? (board?.snapshot() ?? null) : null,
+				lab: here ? activeLab : latestLab(targetSession),
+				forceBoard: targetSession.messages.at(-1)?.text === REVIEW,
+				grounding,
+			});
 			if (i < 0) return;
 			const newLab = targetSession.messages[i]?.lab;
 			if (newLab && id === targetId) {
@@ -105,14 +125,16 @@
 		);
 	}
 
-	// Push-to-talk: first tap starts the mic, second tap transcribes and sends.
+	// Push-to-talk: first tap starts the mic, second tap transcribes into the box to confirm or edit before sending.
 	async function mic() {
 		localErr = "";
 		try {
 			if (!voice.recording) return await startRecording();
 			const heard = await stopRecording();
-			if (heard) say(heard);
-			else localErr = "Didn't catch that. Try again.";
+			if (heard) {
+				text = text.trim() ? `${text.trim()} ${heard}` : heard;
+				tick().then(() => input?.focus());
+			} else localErr = "Didn't catch that. Try again.";
 		} catch (e) {
 			localErr = e instanceof DOMException && e.name === "NotAllowedError" ? "Microphone access is blocked. Allow it in your browser settings." : msg(e);
 		}
@@ -123,6 +145,60 @@
 		send(s, content.trim());
 		run();
 	}
+
+	// The tutor's question still waiting for an answer: the last turn, if it asked one.
+	const openCheck = $derived.by(() => {
+		const m = s?.messages.at(-1);
+		return m?.role === "model" ? m.check && { ...m.check, concepts: m.concepts ?? [] } : undefined;
+	});
+
+	// One-tap 1-4 confidence, collected before the verdict is shown.
+	let confidence = $state<{ sid: string; i: number; resolve: (v: number | undefined) => void } | null>(null);
+	const askConfidence = (sid: string, i: number) =>
+		new Promise<number | undefined>((ok) => (confidence = { sid, i, resolve: (v) => ((confidence = null), ok(v)) }));
+	const CONFIDENCE = ["Guessing", "Unsure", "Fairly sure", "Certain"];
+
+	// A typed or spoken answer to an open question is graded by a separate call before the tutor replies.
+	async function answer(content: string) {
+		const target = s;
+		const check = openCheck;
+		if (!target || busy || !content.trim()) return;
+		if (!check) return say(content);
+		const i = send(target, content.trim());
+		checking = target.id;
+		const sure = askConfidence(target.id, i);
+		try {
+			const { attempted, ...g } = await grade(check.question, check.keyPoints, content.trim());
+			if (!attempted) {
+				confidence?.resolve(undefined);
+				return;
+			}
+			const conf = await sure;
+			recordGrade(target, i, { ...check, ...g, confidence: conf, hints: priorTries(target, check.question) });
+		} catch (e) {
+			confidence?.resolve(undefined);
+			console.error("grader:", e); // the tutor still judges the answer itself
+		} finally {
+			checking = null;
+			run(target);
+		}
+	}
+
+	// "Show me": reveal the full worked answer; logged as a hint so the question earns no credit.
+	function showMe() {
+		const check = openCheck;
+		if (!s || busy || !check) return;
+		const hints = priorTries(s, check.question) + 1;
+		const i = send(s, "Show me the full worked answer.");
+		recordGrade(s, i, { ...check, covered: [], missed: check.keyPoints, verdict: "wrong", hints, shown: true });
+		run();
+	}
+
+	const VERDICT = {
+		correct: { label: "Correct", cls: "border-emerald-600/40 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+		partial: { label: "Partly right", cls: "border-amber-600/40 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+		wrong: { label: "Not quite", cls: "border-destructive/40 bg-destructive/10 text-destructive" },
+	};
 
 	// A lab check finished while the tutor is still replying: hold it and send once the reply lands.
 	let queuedCheck = $state<{ id: string; summary: string } | null>(null);
@@ -142,7 +218,7 @@
 
 	function submit(e: Event) {
 		e.preventDefault();
-		say(text);
+		answer(text);
 		text = "";
 	}
 
@@ -179,18 +255,32 @@
 	$effect(() => {
 		void s?.messages.length;
 		void busy;
+		void confidence;
 		tick().then(() => viewport?.scrollTo({ top: viewport.scrollHeight, behavior: "smooth" }));
 	});
 </script>
 
 {#if !s}
-	<p class="text-muted-foreground pt-10 text-center">Session not found. <a class="underline" href="/learn">Start one</a>.</p>
+	{#if auth.valid && !synced.pulled}
+		<p class="text-muted-foreground pt-10 text-center">Loading session…</p>
+	{:else}
+		<p class="text-muted-foreground pt-10 text-center">Session not found. <a class="underline" href="/learn">Start one</a>.</p>
+	{/if}
 {:else}
 	<div class="grid grid-cols-1 gap-4 lg:h-[calc(100svh-4.5rem)] lg:grid-cols-2">
 		<!-- Lesson -->
 		<section class="flex h-[80svh] min-h-0 min-w-0 flex-col rounded-xl border lg:h-auto">
 			<header class="flex items-center gap-2 border-b px-4 py-2.5">
 				<h1 class="flex-1 truncate font-semibold">{s.topic}</h1>
+				<Button
+					size="sm"
+					variant={grounding ? "secondary" : "ghost"}
+					aria-pressed={grounding}
+					title={grounding ? "Stop checking replies against Google Search" : "Check replies against Google Search (shows sources)"}
+					onclick={() => (grounding = !grounding)}
+				>
+					<Globe /> Search {grounding ? "on" : "off"}
+				</Button>
 				<Button
 					size="sm"
 					variant={voice.on ? "secondary" : "ghost"}
@@ -208,10 +298,37 @@
 					</Button>
 				{/if}
 			</header>
+			{#if notice.text}
+				<div role="status" class="text-destructive flex items-center gap-2 border-b px-4 py-1.5 text-xs">
+					<span class="flex-1">{notice.text}</span>
+					<button class="underline" onclick={() => (notice.text = "")}>Dismiss</button>
+				</div>
+			{/if}
 			<div bind:this={viewport} class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
 				{#each s.messages as m, i (i)}
 					{#if m.role === "user"}
 						<div class="bg-muted ml-auto w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap">{m.text}</div>
+						{#if confidence?.sid === id && confidence.i === i}
+							<div class="ml-auto flex w-fit flex-wrap items-center justify-end gap-1.5 text-xs" role="group" aria-label="How sure are you?">
+								<span class="text-muted-foreground">How sure are you?</span>
+								{#each CONFIDENCE as label, c (c)}
+									<Button size="sm" variant="outline" class="h-7 px-2 text-xs" onclick={() => confidence?.resolve(c + 1)}>{c + 1} · {label}</Button>
+								{/each}
+								<Button size="sm" variant="ghost" class="h-7 px-2 text-xs" onclick={() => confidence?.resolve(undefined)}>Skip</Button>
+							</div>
+						{:else if m.grade?.shown}
+							<div class="text-muted-foreground -mt-2 ml-auto w-fit text-xs">Answer shown · no credit</div>
+						{:else if m.grade}
+							{@const v = effectiveVerdict(m.grade)}
+							<div class="-mt-2 ml-auto flex w-fit items-center gap-2 text-xs">
+								<span class="rounded-full border px-2.5 py-0.5 font-medium {VERDICT[v].cls}">
+									{VERDICT[v].label}{m.grade.override ? " (your call)" : ""}
+								</span>
+								<button class="text-muted-foreground hover:text-foreground underline" onclick={() => toggleOverride(s, i)}>
+									{m.grade.override ? "Undo" : m.grade.verdict === "correct" ? "I was wrong" : "I was right"}
+								</button>
+							</div>
+						{/if}
 					{:else}
 						<!-- eslint-disable-next-line svelte/no-at-html-tags -- schema-filtered via generateHTML -->
 						<div>
@@ -236,6 +353,15 @@
 									</button>
 								{/if}
 
+								{#if m.sources}
+									<span class="text-muted-foreground inline-flex flex-wrap items-center gap-x-2 text-xs">
+										Sources:
+										{#each m.sources as src, n (src.uri)}
+											<a class="hover:text-foreground underline" href={src.uri} target="_blank" rel="noopener noreferrer">[{n + 1}] {src.title}</a>
+										{/each}
+									</span>
+								{/if}
+
 								{#if m.topicSuggestion}
 									<button
 										type="button"
@@ -246,6 +372,15 @@
 									</button>
 								{/if}
 							</div>
+							{#if m.searchWidget}
+								<!-- Google's required Search Suggestions, isolated: no scripts, links open in a new tab. -->
+								<iframe
+									title="Google Search suggestions"
+									class="mt-1.5 h-14 w-full rounded-lg"
+									sandbox="allow-popups allow-popups-to-escape-sandbox"
+									srcdoc={`<base target="_blank"><style>body{margin:0}</style>${m.searchWidget}`}
+								></iframe>
+							{/if}
 						</div>
 					{/if}
 				{/each}
@@ -266,19 +401,24 @@
 						{:else}
 							<Compass class="text-primary size-4 animate-spin" />
 						{/if}
-						<span>{THINKING_LABEL[theme] ?? THINKING_LABEL.general}</span>
+						<span>{checking === id ? "Checking your answer…" : (THINKING_LABEL[theme] ?? THINKING_LABEL.general)}</span>
 					</div>
 				{:else if error}
 					<div class="text-destructive flex items-center gap-2 text-sm">
 						{error}
-						{#if auth.valid && lastIsUser}<Button size="sm" variant="outline" onclick={run}><RotateCcw /> Retry</Button>{/if}
+						{#if auth.valid && lastIsUser}<Button size="sm" variant="outline" onclick={() => run()}><RotateCcw /> Retry</Button>{/if}
 						{#if !auth.valid}<a class="underline" href="/login">Sign in</a>{/if}
 					</div>
 				{/if}
 			</div>
 			<div class="space-y-2 border-t p-3">
 				<div class="flex flex-wrap gap-1.5">
-					<Button size="sm" variant="outline" disabled={busy} onclick={() => say("Review my notes and whiteboard. What's right, what's wrong, what's missing?")}>
+					{#if openCheck}
+						<Button size="sm" variant="outline" disabled={busy} onclick={showMe} title="See the full worked answer (this question then earns no credit)">
+							<Lightbulb /> Show me
+						</Button>
+					{/if}
+					<Button size="sm" variant="outline" disabled={busy} onclick={() => say(REVIEW)}>
 						<ScanSearch /> Review my notes & whiteboard
 					</Button>
 					<Button size="sm" variant="outline" disabled={busy} onclick={() => say("Quiz me on everything so far, one question at a time, mixing earlier material.")}>
@@ -287,21 +427,22 @@
 				</div>
 				<form class="flex items-end gap-2" onsubmit={submit}>
 					<Textarea
+						bind:ref={input}
 						bind:value={text}
 						rows={2}
 						class="max-h-40 min-h-0 flex-1 resize-none"
 						placeholder={voice.recording ? "Listening… tap Done when you're finished" : voice.transcribing ? "Transcribing…" : "Answer from memory, or ask a question…"}
 						disabled={voice.recording || voice.transcribing}
 						aria-label="Message the trainer"
-						onkeydown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), say(text), (text = ""))}
+						onkeydown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), answer(text), (text = ""))}
 					/>
 					<Button
 						type="button"
 						size={voice.recording ? "default" : "icon"}
 						variant={voice.recording ? "destructive" : "outline"}
 						disabled={busy || voice.transcribing}
-						aria-label={voice.recording ? "Stop and send" : "Answer by voice"}
-						title={voice.recording ? "Stop and send" : "Answer by voice"}
+						aria-label={voice.recording ? "Stop recording" : "Answer by voice"}
+						title={voice.recording ? "Stop and put what you said in the box" : "Answer by voice"}
 						onclick={mic}
 					>
 						{#if voice.transcribing}<LoaderCircle class="animate-spin" />{:else if voice.recording}<span class="size-2 animate-pulse rounded-full bg-current"></span> Done{:else}<Mic />{/if}

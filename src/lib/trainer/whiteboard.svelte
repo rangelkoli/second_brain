@@ -19,8 +19,16 @@
 	let drawing = false;
 	const history: ImageData[] = []; // ponytail: last 20 states in memory only; undo doesn't survive reload
 
+	// Downscaled JPEG: 768px wide for the AI (enough to read a sketch), 1200px for the local copy.
+	function jpeg(w: number) {
+		const c = document.createElement("canvas");
+		c.width = w;
+		c.height = Math.round((w * H) / W);
+		c.getContext("2d")!.drawImage(canvas, 0, 0, c.width, c.height);
+		return c.toDataURL("image/jpeg", 0.8);
+	}
 	/** JPEG snapshot for the AI, or null when nothing is drawn. */
-	export const snapshot = () => (blank ? null : canvas.toDataURL("image/jpeg", 0.8));
+	export const snapshot = () => (blank ? null : jpeg(768));
 
 	function reset() {
 		ctx.fillStyle = "#fff";
@@ -33,7 +41,7 @@
 		const saved = loadBoard(id);
 		if (saved) {
 			const img = new Image();
-			img.onload = () => ctx.drawImage(img, 0, 0);
+			img.onload = () => ctx.drawImage(img, 0, 0, W, H);
 			img.src = saved;
 			blank = false;
 		}
@@ -68,7 +76,7 @@
 		blank = false;
 		persist();
 	}
-	const persist = () => saveBoard(id, blank ? null : canvas.toDataURL("image/jpeg", 0.8));
+	const persist = () => saveBoard(id, blank ? null : jpeg(1200));
 
 	function undo() {
 		const prev = history.pop();
