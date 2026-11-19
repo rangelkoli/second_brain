@@ -17,20 +17,18 @@
 		deleteCustomCurriculum,
 		deleteSession,
 		errors,
-		gemini,
 		generateCurriculum,
 		pending,
 		sessionForNode,
 		sessions,
-		setKey,
 		startSession,
 		toggleNodeCompleted,
 	} from "$lib/trainer/trainer.svelte";
+	import { auth } from "$lib/sync.svelte";
 	import type { CurriculumNode, CurriculumSubject } from "$lib/trainer/curriculum";
 
 	let topic = $state("");
 	let level = $state("");
-	let key = $state("");
 	let selectedSubjectId = $state("math");
 	let pathGoal = $state("");
 	let generatingPath = $state(false);
@@ -72,11 +70,6 @@
 		}
 	}
 
-	function saveKey(e: Event) {
-		e.preventDefault();
-		setKey(key);
-		key = "";
-	}
 	const fmt = (t: number) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 </script>
 
@@ -89,23 +82,16 @@
 		</p>
 	</div>
 
-	{#if !gemini.key}
-		<form class="space-y-2 rounded-lg border p-4" onsubmit={saveKey}>
-			<label for="key" class="text-sm font-medium">Gemini API key</label>
-			<p class="text-muted-foreground text-sm">
-				Stored only in this browser. Get one at <a class="underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>.
-			</p>
-			<div class="flex gap-2">
-				<Input id="key" type="password" autocomplete="off" placeholder="AIza…" bind:value={key} class="flex-1" />
-				<Button type="submit" disabled={!key.trim()}>Save</Button>
-			</div>
-		</form>
+	{#if !auth.valid}
+		<p class="rounded-lg border p-4 text-sm">
+			<a class="underline" href="/login">Sign in to the sync server</a> to use the trainer. It calls Gemini with the server's
+			<code>GEMINI_API_KEY</code>.
+		</p>
 	{:else}
 		<form class="space-y-3" onsubmit={start}>
 			<Input placeholder="What do you want to learn? e.g. B natural minor scale, Bubble sort, Projectile motion…" bind:value={topic} aria-label="Topic" />
 			<Textarea placeholder="What you already know (optional). Helps the trainer start at the right level." bind:value={level} rows={2} aria-label="What you already know" />
-			<div class="flex items-center justify-between">
-				<button type="button" class="text-muted-foreground hover:text-foreground text-xs underline" onclick={() => setKey("")}>Change API key</button>
+			<div class="flex justify-end">
 				<Button type="submit" disabled={!topic.trim()}>Start learning</Button>
 			</div>
 		</form>
@@ -151,7 +137,7 @@
 		</div>
 
 		<!-- Generate Custom Path -->
-		{#if gemini.key}
+		{#if auth.valid}
 			<form class="flex flex-wrap gap-2" onsubmit={buildPath}>
 				<Input
 					bind:value={pathGoal}
@@ -206,7 +192,7 @@
 										size="sm"
 										variant={existing ? "secondary" : "outline"}
 										class="h-7 shrink-0 px-2.5 text-xs"
-										disabled={!gemini.key && !existing}
+										disabled={!auth.valid && !existing}
 										onclick={() => openNode(node)}
 									>
 										{existing ? "Resume" : "Start"} <ArrowRight class="size-3" />

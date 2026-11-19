@@ -2,6 +2,7 @@ import { generateHTML } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import { MarkdownManager } from "@tiptap/markdown";
 import { addTodo, createNote, getNote, updateNote } from "$lib/store.svelte";
+import { auth, pb } from "$lib/sync.svelte";
 import { reviewDates } from "./reviews";
 import { parseTutorResponse, searchWikimediaImage, type Lab } from "./lab";
 import { BUILTIN_CURRICULA, parseCurriculumJson, type CurriculumSubject } from "./curriculum";
@@ -32,7 +33,6 @@ export type Session = {
 const MODEL = "gemini-4-hydrogen";
 const STT_MODEL = "gemini-3.5-transcribe";
 const TTS_MODEL = "gemini-3.8-flash-tts";
-const KEY = "trainer-gemini-key";
 const SESSIONS = "trainer-sessions";
 const CURRICULA_KEY = "trainer-curricula";
 const COMPLETED_NODES_KEY = "trainer-completed-nodes";
@@ -52,12 +52,7 @@ function store(k: string, v: string | null) {
 	}
 }
 
-// The key stays in this browser (never in the bundle), so a public web build can't leak it.
-export const gemini = $state({ key: load<string>(KEY, "") });
-export function setKey(key: string) {
-	gemini.key = key.trim();
-	store(KEY, gemini.key ? JSON.stringify(gemini.key) : null);
-}
+store("trainer-gemini-key", null); // drop the key older builds kept in localStorage
 
 export const sessions: Session[] = $state(load<Session[]>(SESSIONS, []));
 const save = () => store(SESSIONS, JSON.stringify(sessions));
@@ -192,15 +187,11 @@ Optional "check" inside "lab" (great for quick prediction or vocab matching befo
 - { "kind": "predict", "prompt": "...", "options": ["...","..."], "answerIndex": 0, "explanation": "..." }
 - { "kind": "match", "prompt": "Match the pairs", "pairs": [{"left":"Salut","right":"Hi"}] }`;
 
+// Gemini goes through the sync server (pocketbase/pb_hooks/gemini.pb.js), which holds GEMINI_API_KEY.
 async function call(model: string, body: object) {
-	if (!gemini.key) throw new Error("Add your Gemini API key first.");
-	const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-		method: "POST",
-		headers: { "content-type": "application/json", "x-goog-api-key": gemini.key },
-		body: JSON.stringify(body),
-	});
-	const json = await res.json().catch(() => ({}));
-	if (!res.ok) throw new Error(json.error?.message ?? `Gemini error ${res.status}`);
+	if (!pb || !auth.valid) throw new Error("Sign in to the sync server to use the trainer.");
+	// requestKey: null so concurrent calls (background sessions, speech) don't auto-cancel each other.
+	const json = await pb.send(`/api/gemini/${model}`, { method: "POST", body, requestKey: null });
 	return (json.candidates?.[0]?.content?.parts ?? []) as GeminiPart[];
 }
 type GeminiPart = { text?: string; thought?: boolean; inlineData?: { mimeType: string; data: string }; audioTranscription?: { text: string } };

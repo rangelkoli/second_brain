@@ -28,11 +28,11 @@
 	import Compass from "@lucide/svelte/icons/compass";
 	import GitFork from "@lucide/svelte/icons/git-fork";
 	import { noteByPath, updateNote } from "$lib/store.svelte";
+	import { auth } from "$lib/sync.svelte";
 	import { inferSubjectTheme, type Lab } from "$lib/trainer/lab";
 	import {
 		ask,
 		errors,
-		gemini,
 		getSession,
 		latestLab,
 		pending,
@@ -255,8 +255,8 @@
 				{:else if error}
 					<div class="text-destructive flex items-center gap-2 text-sm">
 						{error}
-						{#if gemini.key && lastIsUser}<Button size="sm" variant="outline" onclick={run}><RotateCcw /> Retry</Button>{/if}
-						{#if !gemini.key}<a class="underline" href="/learn">Add key</a>{/if}
+						{#if auth.valid && lastIsUser}<Button size="sm" variant="outline" onclick={run}><RotateCcw /> Retry</Button>{/if}
+						{#if !auth.valid}<a class="underline" href="/login">Sign in</a>{/if}
 					</div>
 				{/if}
 			</div>

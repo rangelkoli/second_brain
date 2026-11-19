@@ -31,4 +31,4 @@ Set `VITE_PB_URL` in `.env.local` (see `.env.example`) to your server, then `npm
 
 Replies are kept short (about 60 words) and in plain language. **Voice on** reads each reply aloud (`gemini-3.8-flash-tts`), **Listen** replays one, and the mic button lets you answer out loud (`gemini-3.5-transcribe`): tap it, talk, tap **Done**. The desktop app asks for microphone access the first time.
 
-Paste a Gemini API key from [AI Studio](https://aistudio.google.com/apikey) on the Trainer page. It is stored only in that browser's localStorage, never in the build. Session notes are normal synced notes; lesson transcripts and whiteboards stay in the browser.
+Set `GEMINI_API_KEY` (from [AI Studio](https://aistudio.google.com/apikey)) in the PocketBase server's environment; `scripts/dev.sh` loads it from `.env.local`. The trainer calls Gemini through the server hook `pocketbase/pb_hooks/gemini.pb.js`, so you must be signed in to the sync server and the key never reaches the browser. Session notes are normal synced notes; lesson transcripts and whiteboards stay in the browser.
