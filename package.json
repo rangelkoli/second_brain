@@ -11,7 +11,9 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "pb": "pocketbase serve --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --publicDir build"
+    "pb": "pocketbase serve --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --publicDir build",
+    "test": "for f in src/lib/trainer/*.test.ts; do node $f || exit 1; done",
+    "eval": "node scripts/eval-tutor.ts"
   },
   "license": "MIT",
   "dependencies": {
