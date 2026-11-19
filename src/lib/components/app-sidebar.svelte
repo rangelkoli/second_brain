@@ -3,6 +3,7 @@
 	import { page } from "$app/state";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
 	import House from "@lucide/svelte/icons/house";
+	import GraduationCap from "@lucide/svelte/icons/graduation-cap";
 	import Plus from "@lucide/svelte/icons/plus";
 	import Brain from "@lucide/svelte/icons/brain";
 	import Cloud from "@lucide/svelte/icons/cloud";
@@ -31,6 +32,13 @@
 					<Sidebar.MenuButton isActive={page.url.pathname === "/"}>
 						{#snippet child({ props })}
 							<a href="/" {...props}><House /><span>Home</span></a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton isActive={page.url.pathname.startsWith("/learn")}>
+						{#snippet child({ props })}
+							<a href="/learn" {...props}><GraduationCap /><span>Trainer</span></a>
 						{/snippet}
 					</Sidebar.MenuButton>
 				</Sidebar.MenuItem>

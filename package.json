@@ -11,7 +11,9 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "pb": "pocketbase serve --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --publicDir build"
+    "pb": "pocketbase serve --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --publicDir build",
+    "test": "for f in src/lib/trainer/*.test.ts; do node $f || exit 1; done",
+    "eval": "node scripts/eval-tutor.ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -29,7 +31,8 @@
     "@tiptap/pm": "^3.32.0",
     "@tiptap/starter-kit": "^3.32.0",
     "@tiptap/suggestion": "^3.32.0",
-    "pocketbase": "^0.28.1"
+    "pocketbase": "^0.28.1",
+    "ts-fsrs": "^6.0.0"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.3.0",
