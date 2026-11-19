@@ -11,13 +11,20 @@
 	import LoaderCircle from "@lucide/svelte/icons/loader-circle";
 	import ArrowRight from "@lucide/svelte/icons/arrow-right";
 	import X from "@lucide/svelte/icons/x";
+	import Lock from "@lucide/svelte/icons/lock";
+	import Layers from "@lucide/svelte/icons/layers";
+	import { Checkbox } from "$lib/components/ui/checkbox/index.js";
 	import {
 		allCurricula,
+		blockingPrereqs,
 		completedNodes,
+		countDue,
 		deleteCustomCurriculum,
 		deleteSession,
 		errors,
 		generateCurriculum,
+		nodeDone,
+		nodeMastery,
 		notice,
 		pending,
 		sessionForNode,
@@ -26,10 +33,17 @@
 		toggleNodeCompleted,
 	} from "$lib/trainer/trainer.svelte";
 	import { auth } from "$lib/sync.svelte";
+	import { today } from "$lib/store.svelte";
 	import type { CurriculumNode, CurriculumSubject } from "$lib/trainer/curriculum";
 
 	let topic = $state("");
 	let level = $state("");
+	let goalDate = $state(""); // optional; FSRS keeps reviews inside it
+	let diagnostic = $state(true); // placement quiz first
+	let due = $state(0);
+	$effect(() => {
+		if (auth.valid) countDue().then((n) => (due = n)).catch(() => {});
+	});
 	let selectedSubjectId = $state("math");
 	let pathGoal = $state("");
 	let generatingPath = $state(false);
@@ -40,19 +54,19 @@
 
 	function subjectStats(subj: CurriculumSubject) {
 		const nodes = subj.branches.flatMap((b) => b.nodes);
-		const done = nodes.filter((n) => completedNodes[n.id]).length;
+		const done = nodes.filter((n) => nodeDone(n.id)).length;
 		return { done, total: nodes.length };
 	}
 
 	function start(e: Event) {
 		e.preventDefault();
-		if (topic.trim()) goto(`/learn/${startSession(topic.trim(), level)}`);
+		if (topic.trim()) goto(`/learn/${startSession(topic.trim(), level, { goalDate, diagnostic })}`);
 	}
 
 	function openNode(node: CurriculumNode) {
 		const existing = sessionForNode(node.id);
 		if (existing) return goto(`/learn/${existing.id}`);
-		goto(`/learn/${startSession(node.prompt, "", { curriculumNodeId: node.id, objective: node.summary })}`);
+		goto(`/learn/${startSession(node.prompt, "", { curriculumNodeId: node.id, objective: node.summary, goalDate, diagnostic })}`);
 	}
 
 	async function buildPath(e: Event) {
@@ -71,6 +85,7 @@
 		}
 	}
 
+	const pct = (p: number) => `${Math.round(p * 100)}%`;
 	const fmt = (t: number) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 </script>
 
@@ -99,10 +114,29 @@
 		<form class="space-y-3" onsubmit={start}>
 			<Input placeholder="What do you want to learn? e.g. B natural minor scale, Bubble sort, Projectile motion…" bind:value={topic} aria-label="Topic" />
 			<Textarea placeholder="What you already know (optional). Helps the trainer start at the right level." bind:value={level} rows={2} aria-label="What you already know" />
-			<div class="flex justify-end">
-				<Button type="submit" disabled={!topic.trim()}>Start learning</Button>
+			<div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+				<label class="text-muted-foreground flex items-center gap-2 text-sm">
+					Goal date <span class="text-xs">(optional)</span>
+					<Input type="date" bind:value={goalDate} min={today()} class="h-8 w-40" />
+				</label>
+				<label class="text-muted-foreground flex items-center gap-2 text-sm">
+					<Checkbox bind:checked={diagnostic} />
+					Start with a placement quiz (3-5 questions)
+				</label>
+				<Button type="submit" class="ml-auto" disabled={!topic.trim()}>Start learning</Button>
 			</div>
+			<p class="text-muted-foreground text-xs">Goal date and placement quiz also apply to skill-tree lessons you start below.</p>
 		</form>
+	{/if}
+
+	{#if auth.valid}
+		<a href="/learn/review" class="hover:bg-accent flex items-center gap-3 rounded-lg border px-4 py-3 text-sm transition-colors">
+			<Layers class="text-muted-foreground size-4" />
+			<span class="flex-1">
+				{#if due}<span class="font-medium">{due} card{due === 1 ? "" : "s"} due</span> for review{:else}No cards due. Review cards come from your answers and from "Make cards" on a note.{/if}
+			</span>
+			{#if due}<ArrowRight class="size-4" />{/if}
+		</a>
 	{/if}
 
 	<!-- Curriculum Skill Tree -->
@@ -170,27 +204,44 @@
 						<h3 class="mb-2.5 text-sm font-semibold">{branch.title}</h3>
 						<div class="border-border/70 ml-2 space-y-2 border-l pl-4">
 							{#each branch.nodes as node (node.id)}
-								{@const done = Boolean(completedNodes[node.id])}
+								{@const m = nodeMastery(node.id)}
+								{@const manual = Boolean(completedNodes[node.id])}
+								{@const done = nodeDone(node.id)}
+								{@const blocked = done ? [] : blockingPrereqs(node.id)}
 								{@const existing = sessionForNode(node.id)}
-								<div class="bg-card flex items-center gap-3 rounded-md border px-3 py-2">
+								<div class="bg-card flex items-center gap-3 rounded-md border px-3 py-2 {blocked.length ? 'border-dashed' : ''}">
 									<button
 										type="button"
-										class="text-muted-foreground hover:text-primary shrink-0"
-										aria-label={done ? "Mark incomplete" : "Mark completed"}
+										class="text-muted-foreground hover:text-primary shrink-0 disabled:hover:text-current"
+										aria-label={done && !manual ? "Mastered" : done ? "Mark incomplete" : "Mark completed"}
+										title={done && !manual ? "Mastered from your answers" : undefined}
+										disabled={done && !manual}
 										onclick={() => toggleNodeCompleted(node.id)}
 									>
 										{#if done}
 											<CheckCircle2 class="size-4 text-emerald-600 dark:text-emerald-400" />
+										{:else if blocked.length}
+											<Lock class="size-4" />
 										{:else}
 											<Circle class="size-4" />
 										{/if}
 									</button>
-									<div class="min-w-0 flex-1">
+									<div class="min-w-0 flex-1 {blocked.length ? 'opacity-60' : ''}">
 										<div class="truncate text-sm font-medium {done ? 'text-muted-foreground line-through' : ''}">{node.title}</div>
-										{#if node.summary}
+										{#if blocked.length}
+											<div class="text-muted-foreground truncate text-xs">Not ready yet: learn {blocked.map((b) => b.title).join(" and ")} first</div>
+										{:else if node.summary}
 											<div class="text-muted-foreground truncate text-xs">{node.summary}</div>
 										{/if}
 									</div>
+									{#if m !== undefined}
+										<div class="flex shrink-0 items-center gap-1.5" title="Mastery from your answers (85% completes the lesson)">
+											<div class="bg-muted h-1.5 w-12 overflow-hidden rounded-full" role="meter" aria-label="Mastery" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(m * 100)}>
+												<div class="h-full rounded-full {m >= 0.85 ? 'bg-emerald-600 dark:bg-emerald-400' : 'bg-primary'}" style="width: {pct(m)}"></div>
+											</div>
+											<span class="text-muted-foreground w-8 text-right text-xs tabular-nums">{pct(m)}</span>
+										</div>
+									{/if}
 									{#if existing && pending[existing.id]}
 										<Badge variant="secondary" class="shrink-0 gap-1 text-[10px]">
 											<LoaderCircle class="size-3 animate-spin" /> Generating
@@ -228,7 +279,7 @@
 						{:else if errors[s.id]}
 							<Badge variant="destructive" class="text-[10px]">Error</Badge>
 						{/if}
-						{#if s.reviews}<span class="text-muted-foreground text-xs">reviews scheduled</span>{/if}
+						{#if s.summary}<span class="text-muted-foreground text-xs">finished</span>{/if}
 						<span class="text-muted-foreground text-xs">{fmt(s.createdAt)}</span>
 						<button
 							class="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"

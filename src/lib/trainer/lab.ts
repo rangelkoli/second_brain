@@ -388,9 +388,6 @@ export const verdictOf = (keyPoints: string[], covered: string[]): Verdict => {
 export const effectiveVerdict = (g: { verdict: Verdict; override?: boolean }): Verdict =>
 	g.override ? (g.verdict === "correct" ? "wrong" : "correct") : g.verdict;
 
-// ponytail: "most answers right" stands in for mastery until the learner-model pass (BKT p_mastery) replaces it.
-export const mostlyRight = (verdicts: Verdict[], min = 3) =>
-	verdicts.length >= min && verdicts.filter((v) => v === "correct").length / verdicts.length >= 2 / 3;
 
 /**
  * Drops old turns in whole blocks (keeping the kickoff) so the request prefix only changes every `block` turns

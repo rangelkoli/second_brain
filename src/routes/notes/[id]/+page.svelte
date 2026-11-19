@@ -4,11 +4,23 @@
 	import AgentBar from "$lib/agent/agent-bar.svelte";
 	import { session } from "$lib/agent/codex.svelte";
 	import { desktop, getNote, updateNote } from "$lib/store.svelte";
+	import MakeCards from "$lib/trainer/make-cards.svelte";
 
 	const id = $derived(page.params.id!);
 	const note = $derived(getNote(id));
 	// Read-only while Codex patches this file, so typing can't race its edits.
 	const busy = $derived(session(id).busy);
+
+	// ?h=Heading (from a review card's "Explain") scrolls to that heading once the editor has rendered.
+	$effect(() => {
+		const h = page.url.searchParams.get("h")?.trim().toLowerCase();
+		if (!h || !note) return;
+		const t = setTimeout(() => {
+			const el = [...document.querySelectorAll(".ProseMirror :is(h1, h2, h3, h4, h5, h6)")].find((e) => e.textContent?.trim().toLowerCase() === h);
+			el?.scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+		}, 150);
+		return () => clearTimeout(t);
+	});
 </script>
 
 {#if note}
@@ -20,6 +32,7 @@
 			readonly={busy}
 			oninput={(e) => updateNote(id, { title: e.currentTarget.value })}
 		/>
+		<div class="mb-4"><MakeCards title={note.title} content={note.content} notePath={note.path} /></div>
 		{#key id}
 			<Editor content={note.content} editable={!busy} onchange={(content) => updateNote(id, { content })} />
 		{/key}

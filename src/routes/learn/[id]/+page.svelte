@@ -10,7 +10,7 @@
 	import ArrowUp from "@lucide/svelte/icons/arrow-up";
 	import ScanSearch from "@lucide/svelte/icons/scan-search";
 	import CircleHelp from "@lucide/svelte/icons/circle-help";
-	import CalendarClock from "@lucide/svelte/icons/calendar-clock";
+	import Flag from "@lucide/svelte/icons/flag";
 	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 	import Mic from "@lucide/svelte/icons/mic";
 	import Square from "@lucide/svelte/icons/square";
@@ -31,10 +31,13 @@
 	import Lightbulb from "@lucide/svelte/icons/lightbulb";
 	import { noteByPath, updateNote } from "$lib/store.svelte";
 	import { auth } from "$lib/sync.svelte";
-	import { effectiveVerdict, inferSubjectTheme, type Lab } from "$lib/trainer/lab";
+	import { effectiveVerdict, inferSubjectTheme, type Lab, type Verdict } from "$lib/trainer/lab";
+	import MakeCards from "$lib/trainer/make-cards.svelte";
 	import {
 		ask,
+		dueForQuiz,
 		errors,
+		finishSession,
 		getSession,
 		grade,
 		latestLab,
@@ -42,7 +45,7 @@
 		pending,
 		priorTries,
 		recordGrade,
-		scheduleReviews,
+		recordLabCheck,
 		send,
 		startSession,
 		synced,
@@ -81,13 +84,14 @@
 			selectedLab = null;
 			unseenLab = false;
 			localErr = "";
+			finished = "";
 			confidence?.resolve(undefined); // leaving mid-prompt counts as skipped
 			const hasLab = s ? Boolean(latestLab(s)) : false;
 			tab = hasLab ? "lab" : "notes";
 		}
 	});
 
-	async function run(targetSession: Session | undefined = s) {
+	async function run(targetSession: Session | undefined = s, extra = "") {
 		if (!targetSession || pending[targetSession.id]) return;
 		localErr = "";
 		const targetId = targetSession.id;
@@ -99,6 +103,7 @@
 				lab: here ? activeLab : latestLab(targetSession),
 				forceBoard: targetSession.messages.at(-1)?.text === REVIEW,
 				grounding,
+				extra,
 			});
 			if (i < 0) return;
 			const newLab = targetSession.messages[i]?.lab;
@@ -140,10 +145,38 @@
 		}
 	}
 
-	function say(content: string) {
+	function say(content: string, extra = "") {
 		if (!s || busy || !content.trim()) return;
 		send(s, content.trim());
-		run();
+		run(s, extra);
+	}
+
+	// "Quiz me" interleaves due cards from this lesson and its sibling nodes (sent with the turn, not shown).
+	const QUIZ = "Quiz me on everything so far, one question at a time, mixing earlier material.";
+	let quizzing = $state(false);
+	async function quiz() {
+		if (!s || busy || quizzing) return;
+		quizzing = true;
+		const extra = await dueForQuiz(s).finally(() => (quizzing = false));
+		say(QUIZ, extra);
+	}
+
+	// Session end: summary into the note and tutor memory, one review to-do on the next due day.
+	let finishing = $state(false);
+	let finished = $state("");
+	async function finish() {
+		if (!s || finishing) return;
+		finishing = true;
+		localErr = "";
+		try {
+			const day = await finishSession(s);
+			finished = `Summary added to your note under "Summary".${day ? ` Review to-do added for ${day}.` : ""}`;
+			tab = "notes";
+		} catch (e) {
+			localErr = msg(e);
+		} finally {
+			finishing = false;
+		}
 	}
 
 	// The tutor's question still waiting for an answer: the last turn, if it asked one.
@@ -202,8 +235,9 @@
 
 	// A lab check finished while the tutor is still replying: hold it and send once the reply lands.
 	let queuedCheck = $state<{ id: string; summary: string } | null>(null);
-	function reportCheck(summary: string) {
-		if (!s) return false;
+	function reportCheck(summary: string, verdict: Verdict) {
+		if (!s || !activeLab) return false;
+		recordLabCheck(s, activeLab, verdict);
 		if (busy) queuedCheck = { id, summary };
 		else say(summary);
 		return true;
@@ -290,14 +324,22 @@
 				>
 					{#if voice.on}<Volume2 /> Voice on{:else}<VolumeOff /> Voice off{/if}
 				</Button>
-				{#if s.reviews}
-					<span class="text-muted-foreground shrink-0 text-xs" title="Review to-dos on {s.reviews.join(', ')}">Reviews scheduled</span>
-				{:else}
-					<Button size="sm" variant="ghost" onclick={() => scheduleReviews(s)} title="Adds review to-dos 1, 3, 7 and 21 days from now">
-						<CalendarClock /> Schedule reviews
-					</Button>
-				{/if}
+				<Button
+					size="sm"
+					variant="ghost"
+					disabled={finishing || busy || s.messages.length < 3}
+					onclick={finish}
+					title="Write a short summary into your note, remember what to work on, and add a review to-do for when your cards come due"
+				>
+					{#if finishing}<LoaderCircle class="animate-spin" /> Summarizing…{:else}<Flag /> {s.summary ? "Update summary" : "Finish session"}{/if}
+				</Button>
 			</header>
+			{#if finished}
+				<div role="status" class="text-muted-foreground flex items-center gap-2 border-b px-4 py-1.5 text-xs">
+					<span class="flex-1">{finished}</span>
+					<button class="underline" onclick={() => (finished = "")}>Dismiss</button>
+				</div>
+			{/if}
 			{#if notice.text}
 				<div role="status" class="text-destructive flex items-center gap-2 border-b px-4 py-1.5 text-xs">
 					<span class="flex-1">{notice.text}</span>
@@ -307,7 +349,13 @@
 			<div bind:this={viewport} class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
 				{#each s.messages as m, i (i)}
 					{#if m.role === "user"}
-						<div class="bg-muted ml-auto w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap">{m.text}</div>
+						<!-- The kickoff's placement instructions and related-note excerpts are for the tutor; show the first line. -->
+						<div class="bg-muted ml-auto w-fit max-w-[85%] rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap">{i === 0 ? m.text.split("\n\n")[0] : m.text}</div>
+						{#if i === 0 && m.text.includes("placement quiz")}
+							<div class="text-muted-foreground -mt-2 ml-auto w-fit text-xs">
+								Placement quiz first{m.text.includes("Related notes from my vault") ? ", drawing on related notes" : ""}
+							</div>
+						{/if}
 						{#if confidence?.sid === id && confidence.i === i}
 							<div class="ml-auto flex w-fit flex-wrap items-center justify-end gap-1.5 text-xs" role="group" aria-label="How sure are you?">
 								<span class="text-muted-foreground">How sure are you?</span>
@@ -421,7 +469,7 @@
 					<Button size="sm" variant="outline" disabled={busy} onclick={() => say(REVIEW)}>
 						<ScanSearch /> Review my notes & whiteboard
 					</Button>
-					<Button size="sm" variant="outline" disabled={busy} onclick={() => say("Quiz me on everything so far, one question at a time, mixing earlier material.")}>
+					<Button size="sm" variant="outline" disabled={busy || quizzing} onclick={quiz}>
 						<CircleHelp /> Quiz me
 					</Button>
 				</div>
@@ -488,6 +536,7 @@
 
 			<div class="min-h-0 flex-1 overflow-y-auto p-4" class:hidden={tab !== "notes"}>
 				{#if note}
+					<div class="mb-3"><MakeCards title={note.title} content={note.content} notePath={note.path} sid={s.id} /></div>
 					{#key note.id}
 						<Editor content={note.content} onchange={(content) => updateNote(note.id, { content })} />
 					{/key}

@@ -31,6 +31,8 @@
 
 	const fmt = (d: string) =>
 		new Date(d + "T00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+	// "[label](/path)" to-dos (trainer review reminders) link to an in-app route.
+	const linkOf = (text: string) => /^\[(.+)\]\((\/[^)\s]*)\)$/.exec(text);
 </script>
 
 <div class="mx-auto max-w-2xl space-y-10 pt-6 pb-48">
@@ -91,7 +93,9 @@
 {#snippet todo(t: (typeof db.todos)[number])}
 	<li class="group flex items-center gap-3 px-3 py-2">
 		<Checkbox checked={t.done} onCheckedChange={() => toggleTodo(t.id)} aria-label="Done" />
-		<span class="flex-1 text-sm {t.done ? 'text-muted-foreground line-through' : ''}">{t.text}</span>
+		<span class="flex-1 text-sm {t.done ? 'text-muted-foreground line-through' : ''}">
+			{#if linkOf(t.text)}<a class="underline-offset-2 hover:underline" href={linkOf(t.text)![2]}>{linkOf(t.text)![1]}</a>{:else}{t.text}{/if}
+		</span>
 		{#if t.date && t.date !== now}
 			<span class="text-xs {t.date < now ? 'text-destructive' : 'text-muted-foreground'}">{fmt(t.date)}</span>
 		{/if}

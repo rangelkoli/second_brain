@@ -15,7 +15,7 @@
 	import CheckCircle2 from "@lucide/svelte/icons/check-circle-2";
 	import Send from "@lucide/svelte/icons/send";
 	import { voice, speak, stopSpeaking } from "../voice.svelte";
-	import type { Lab } from "../lab";
+	import type { Lab, Verdict } from "../lab";
 	import MusicLab from "./MusicLab.svelte";
 	import GeometryLab from "./GeometryLab.svelte";
 	import AlgorithmLab from "./AlgorithmLab.svelte";
@@ -24,8 +24,8 @@
 	import ImageLab from "./ImageLab.svelte";
 	import SketchLab from "./SketchLab.svelte";
 
-	// onCheckComplete returns true when the parent accepted (sent or queued) the report.
-	let { lab, onCheckComplete }: { lab: Lab; onCheckComplete?: (summary: string) => boolean } = $props();
+	// onCheckComplete returns true when the parent accepted (sent or queued) the report. The verdict feeds the learner model.
+	let { lab, onCheckComplete }: { lab: Lab; onCheckComplete?: (summary: string, verdict: Verdict) => boolean } = $props();
 
 	let stepIndex = $state(0);
 	let playing = $state(false);
@@ -37,6 +37,7 @@
 	let selectedLeft = $state<string | null>(null);
 	let matched = $state<Record<string, boolean>>({});
 	let wrongRight = $state<string | null>(null);
+	let misses = $state(0); // wrong pairings in a match check
 	let shuffledRights = $state<string[]>([]);
 	let checkReported = $state(false);
 
@@ -60,6 +61,7 @@
 		selectedLeft = null;
 		matched = {};
 		wrongRight = null;
+		misses = 0;
 		checkReported = false;
 		if (lab.check?.kind === "match") {
 			const rights = lab.check.pairs.map((p) => p.right);
@@ -144,6 +146,7 @@
 			selectedLeft = null;
 			wrongRight = null;
 		} else {
+			misses++;
 			wrongRight = rightVal;
 			setTimeout(() => {
 				wrongRight = null;
@@ -155,8 +158,8 @@
 		lab.check?.kind === "match" && lab.check.pairs.length > 0 && lab.check.pairs.every((p) => matched[p.left]),
 	);
 
-	function reportCheck(summary: string) {
-		if (onCheckComplete?.(summary)) checkReported = true;
+	function reportCheck(summary: string, verdict: Verdict) {
+		if (onCheckComplete?.(summary, verdict)) checkReported = true;
 	}
 
 	function onKey(e: KeyboardEvent) {
@@ -336,6 +339,7 @@
 							onclick={() =>
 								reportCheck(
 									`In the "${lab.title}" check (${ck.prompt}), I answered "${ck.options[predictChoice!]}" (${predictChoice === ck.answerIndex ? "correct" : "missed"}).`,
+									predictChoice === ck.answerIndex ? "correct" : "wrong",
 								)}
 						>
 							<Send class="size-3" /> Send to tutor
@@ -402,7 +406,11 @@
 							size="sm"
 							variant="outline"
 							class="h-7 px-2.5 text-xs"
-							onclick={() => reportCheck(`I completed the "${lab.title}" match check (${ck.pairs.length}/${ck.pairs.length} pairs matched).`)}
+							onclick={() =>
+								reportCheck(
+									`I completed the "${lab.title}" match check (${ck.pairs.length}/${ck.pairs.length} pairs matched${misses ? `, ${misses} wrong tries` : " first try"}).`,
+									misses ? "partial" : "correct",
+								)}
 						>
 							<Send class="size-3" /> Send to tutor
 						</Button>

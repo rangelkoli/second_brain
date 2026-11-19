@@ -3,6 +3,7 @@ export type CurriculumNode = {
 	title: string;
 	prompt: string;
 	summary: string;
+	prereqs?: string[]; // node ids that should be mastered first
 };
 
 export type CurriculumBranch = {
@@ -29,24 +30,24 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				nodes: [
 					{ id: "math-ratios", title: "Ratios & Proportions", prompt: "Ratios and proportions", summary: "Compare quantities and scale recipes, speeds, and maps." },
 					{ id: "math-negatives", title: "Negative Numbers", prompt: "Adding and multiplying negative numbers", summary: "Direction on the number line and why two negatives multiply to a positive." },
-					{ id: "math-exponents", title: "Exponents & Roots", prompt: "Exponents and square roots", summary: "Repeated multiplication and undoing squares." },
+					{ id: "math-exponents", title: "Exponents & Roots", prompt: "Exponents and square roots", summary: "Repeated multiplication and undoing squares.", prereqs: ["math-negatives"] },
 				],
 			},
 			{
 				id: "math-geometry",
 				title: "Geometry",
 				nodes: [
-					{ id: "math-pythagorean", title: "Pythagorean Theorem", prompt: "The Pythagorean theorem", summary: "Why a² + b² = c² on right triangles, using area squares." },
+					{ id: "math-pythagorean", title: "Pythagorean Theorem", prompt: "The Pythagorean theorem", summary: "Why a² + b² = c² on right triangles, using area squares.", prereqs: ["math-exponents"] },
 					{ id: "math-circles", title: "Pi & Circle Area", prompt: "Why circle area is pi r squared", summary: "Slicing a circle into wedges to see circumference and area." },
-					{ id: "math-angles", title: "Triangle Angles & Similarity", prompt: "Similar triangles and angle sums", summary: "Parallel lines, 180° proof, and proportional scaling." },
+					{ id: "math-angles", title: "Triangle Angles & Similarity", prompt: "Similar triangles and angle sums", summary: "Parallel lines, 180° proof, and proportional scaling.", prereqs: ["math-ratios"] },
 				],
 			},
 			{
 				id: "math-trig",
 				title: "Trigonometry",
 				nodes: [
-					{ id: "math-sohcahtoa", title: "Sine, Cosine & Tangent", prompt: "Sine, cosine, and tangent on right triangles", summary: "How angles map to side ratios." },
-					{ id: "math-unit-circle", title: "The Unit Circle", prompt: "The unit circle and radians", summary: "Extending trig beyond 90° and wrapping angles around a circle." },
+					{ id: "math-sohcahtoa", title: "Sine, Cosine & Tangent", prompt: "Sine, cosine, and tangent on right triangles", summary: "How angles map to side ratios.", prereqs: ["math-pythagorean", "math-angles"] },
+					{ id: "math-unit-circle", title: "The Unit Circle", prompt: "The unit circle and radians", summary: "Extending trig beyond 90° and wrapping angles around a circle.", prereqs: ["math-sohcahtoa"] },
 				],
 			},
 			{
@@ -54,8 +55,8 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				title: "Calculus",
 				nodes: [
 					{ id: "math-limits", title: "Limits & Continuity", prompt: "Intuition for limits in calculus", summary: "Approaching a point without touching it." },
-					{ id: "math-derivatives", title: "Derivatives as Rates", prompt: "Derivatives as instantaneous slope", summary: "Shrinking secant lines down to speed at an instant." },
-					{ id: "math-integrals", title: "Integrals as Area", prompt: "Integrals as accumulating area", summary: "Adding thin rectangles to measure total change." },
+					{ id: "math-derivatives", title: "Derivatives as Rates", prompt: "Derivatives as instantaneous slope", summary: "Shrinking secant lines down to speed at an instant.", prereqs: ["math-limits"] },
+					{ id: "math-integrals", title: "Integrals as Area", prompt: "Integrals as accumulating area", summary: "Adding thin rectangles to measure total change.", prereqs: ["math-derivatives"] },
 				],
 			},
 			{
@@ -63,7 +64,7 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				title: "Statistics & Data",
 				nodes: [
 					{ id: "math-spread", title: "Mean, Median & Standard Deviation", prompt: "Standard deviation and data spread", summary: "Why averages hide spread and how variance measures it." },
-					{ id: "math-bayes", title: "Bayes' Theorem", prompt: "Bayes theorem with medical test examples", summary: "Updating beliefs when new evidence arrives." },
+					{ id: "math-bayes", title: "Bayes' Theorem", prompt: "Bayes theorem with medical test examples", summary: "Updating beliefs when new evidence arrives.", prereqs: ["math-ratios"] },
 				],
 			},
 		],
@@ -77,8 +78,8 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				title: "Algorithms",
 				nodes: [
 					{ id: "cs-bubblesort", title: "Bubble Sort & Big-O", prompt: "How bubble sort works and why it is O(n^2)", summary: "Neighbor swaps, early exit, and counting comparisons." },
-					{ id: "cs-binarysearch", title: "Binary Search", prompt: "Binary search and O(log n)", summary: "Halving sorted search spaces in logarithmic steps." },
-					{ id: "cs-recursion", title: "Recursion & Call Stacks", prompt: "How recursion and the call stack work", summary: "Base cases, stack frames, and unwinding." },
+					{ id: "cs-binarysearch", title: "Binary Search", prompt: "Binary search and O(log n)", summary: "Halving sorted search spaces in logarithmic steps.", prereqs: ["cs-bubblesort"] },
+					{ id: "cs-recursion", title: "Recursion & Call Stacks", prompt: "How recursion and the call stack work", summary: "Base cases, stack frames, and unwinding.", prereqs: ["cs-binarysearch"] },
 				],
 			},
 			{
@@ -100,15 +101,15 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				title: "Scales & Keys",
 				nodes: [
 					{ id: "music-major", title: "Major Scale Pattern", prompt: "How the major scale whole and half step pattern works", summary: "W-W-H-W-W-W-H on keyboard and staff." },
-					{ id: "music-bminor", title: "B Natural Minor & Key Signatures", prompt: "The B natural minor scale and its relative major", summary: "Whole/half steps, two sharps, and the Circle of Fifths." },
+					{ id: "music-bminor", title: "B Natural Minor & Key Signatures", prompt: "The B natural minor scale and its relative major", summary: "Whole/half steps, two sharps, and the Circle of Fifths.", prereqs: ["music-major"] },
 				],
 			},
 			{
 				id: "music-harmony",
 				title: "Chords & Rhythm",
 				nodes: [
-					{ id: "music-triads", title: "Major vs Minor Triads", prompt: "Building major and minor triads", summary: "Root, third, and fifth intervals you can hear." },
-					{ id: "music-progressions", title: "Chord Progressions & Groove", prompt: "How the Bm - G - D - A chord progression works", summary: "Voice leading, harmonic tension, and drum pulse." },
+					{ id: "music-triads", title: "Major vs Minor Triads", prompt: "Building major and minor triads", summary: "Root, third, and fifth intervals you can hear.", prereqs: ["music-major"] },
+					{ id: "music-progressions", title: "Chord Progressions & Groove", prompt: "How the Bm - G - D - A chord progression works", summary: "Voice leading, harmonic tension, and drum pulse.", prereqs: ["music-triads", "music-bminor"] },
 				],
 			},
 		],
@@ -121,7 +122,7 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				id: "physics-mechanics",
 				title: "Mechanics",
 				nodes: [
-					{ id: "physics-projectile", title: "Projectile Motion", prompt: "Projectile motion, launch angle, and velocity components", summary: "Splitting velocity into Vx and Vy under gravity." },
+					{ id: "physics-projectile", title: "Projectile Motion", prompt: "Projectile motion, launch angle, and velocity components", summary: "Splitting velocity into Vx and Vy under gravity.", prereqs: ["physics-newton"] },
 					{ id: "physics-newton", title: "Newton's Laws", prompt: "Newton's three laws of motion with concrete examples", summary: "Inertia, F=ma, and action-reaction pairs." },
 				],
 			},
@@ -130,7 +131,7 @@ export const BUILTIN_CURRICULA: CurriculumSubject[] = [
 				title: "Electronics",
 				nodes: [
 					{ id: "physics-ohms", title: "Ohm's Law & Resistors", prompt: "Ohm's law: voltage, current, and resistance", summary: "Why LEDs need current-limiting resistors." },
-					{ id: "physics-breadboard", title: "Breadboard LED Circuit", prompt: "How to wire an LED and 220 ohm resistor on a breadboard", summary: "Power rails, row strips A-E and F-J, and closing the loop." },
+					{ id: "physics-breadboard", title: "Breadboard LED Circuit", prompt: "How to wire an LED and 220 ohm resistor on a breadboard", summary: "Power rails, row strips A-E and F-J, and closing the loop.", prereqs: ["physics-ohms"] },
 				],
 			},
 		],
@@ -179,11 +180,13 @@ export function parseCurriculumJson(raw: string, goal: string): CurriculumSubjec
 						const prompt = typeof nd.prompt === "string" && nd.prompt.trim() ? nd.prompt.trim() : nTitle;
 						const summary = typeof nd.summary === "string" ? nd.summary.trim() : "";
 						if (!nTitle) return null;
+						const prereqs = Array.isArray(nd.prereqs) ? nd.prereqs.filter((t): t is string => typeof t === "string") : [];
 						return {
 							id: `custom-${stamp}-${bi}-${ni}-${slug(nTitle)}`,
 							title: nTitle,
 							prompt,
 							summary,
+							prereqs, // titles for now, resolved to ids below
 						};
 					})
 					.filter((x): x is CurriculumNode => x !== null);
@@ -193,6 +196,11 @@ export function parseCurriculumJson(raw: string, goal: string): CurriculumSubjec
 			.filter((x): x is CurriculumBranch => x !== null);
 
 		if (!branches.length) return null;
+		const idOf = new Map(branches.flatMap((b) => b.nodes.map((n) => [n.title.toLowerCase(), n.id])));
+		for (const n of branches.flatMap((b) => b.nodes)) {
+			const ids = n.prereqs!.flatMap((t) => idOf.get(t.trim().toLowerCase()) ?? []).filter((id) => id !== n.id);
+			n.prereqs = ids.length ? ids : undefined;
+		}
 		return {
 			id: `subj-${stamp}-${slug(title)}`,
 			title,
@@ -202,4 +210,9 @@ export function parseCurriculumJson(raw: string, goal: string): CurriculumSubjec
 	} catch {
 		return null;
 	}
+}
+
+/** The node and its branch, across the given subjects. */
+export function findNode(subjects: CurriculumSubject[], id: string) {
+	for (const subj of subjects) for (const branch of subj.branches) for (const node of branch.nodes) if (node.id === id) return { node, branch };
 }

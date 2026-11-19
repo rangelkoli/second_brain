@@ -8,7 +8,6 @@ import {
 	effectiveVerdict,
 	inferSubjectTheme,
 	labContext,
-	mostlyRight,
 	parseTutorResponse,
 	trimHistory,
 	verdictOf,
@@ -151,9 +150,6 @@ assert.strictEqual(verdictOf([], []), "wrong");
 assert.strictEqual(effectiveVerdict({ verdict: "partial", override: true }), "correct");
 assert.strictEqual(effectiveVerdict({ verdict: "correct", override: true }), "wrong");
 assert.strictEqual(effectiveVerdict({ verdict: "wrong" }), "wrong");
-assert.strictEqual(mostlyRight(["correct", "correct"]), false); // too few answers
-assert.strictEqual(mostlyRight(["correct", "correct", "wrong"]), true);
-assert.strictEqual(mostlyRight(["correct", "partial", "wrong"]), false);
 
 // 10. History trimming keeps the kickoff and drops whole blocks, so the prefix is stable between trims
 const turns = (n) => Array.from({ length: n }, (_, i) => i);
