@@ -3,6 +3,7 @@
 	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import Play from "@lucide/svelte/icons/play";
+	import Pause from "@lucide/svelte/icons/pause";
 	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 	import type { LabStep, PhysicsPayload } from "../lab";
 
@@ -188,7 +189,7 @@
 	<!-- Controls -->
 	<div class="bg-muted/40 flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-xs">
 		<Button size="sm" variant={animating ? "secondary" : "default"} class="h-7 px-3" onclick={launch}>
-			<Play class="size-3.5" /> {animating ? "Pause" : "Launch"}
+			{#if animating}<Pause class="size-3.5" /> Pause{:else}<Play class="size-3.5" /> Launch{/if}
 		</Button>
 		<label class="flex items-center gap-2">
 			<span class="font-medium">Angle: {angle}°</span>

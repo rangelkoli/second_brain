@@ -54,6 +54,9 @@
 		type Session,
 	} from "$lib/trainer/trainer.svelte";
 	import { voice, toggleVoice, speak, stopSpeaking, startRecording, stopRecording } from "$lib/trainer/voice.svelte";
+	import { live, liveSupported, startLive, stopLive, interruptLive, sendLiveText } from "$lib/trainer/live.svelte";
+	import AudioLines from "@lucide/svelte/icons/audio-lines";
+	import Hand from "@lucide/svelte/icons/hand";
 
 	const id = $derived(page.params.id!);
 	const s = $derived(getSession(id));
@@ -86,6 +89,7 @@
 			localErr = "";
 			finished = "";
 			confidence?.resolve(undefined); // leaving mid-prompt counts as skipped
+			stopLive();
 			const hasLab = s ? Boolean(latestLab(s)) : false;
 			tab = hasLab ? "lab" : "notes";
 		}
@@ -143,6 +147,25 @@
 		} catch (e) {
 			localErr = e instanceof DOMException && e.name === "NotAllowedError" ? "Microphone access is blocked. Allow it in your browser settings." : msg(e);
 		}
+	}
+
+	// Live voice: a real-time call with the tutor. If it can't start or drops for good, push-to-talk + read-aloud take over.
+	const canLive = liveSupported();
+	const liveOn = $derived(live.status !== "off" && live.sid === id);
+	const LIVE_LABEL = { off: "", connecting: "Connecting…", listening: "Listening", speaking: "Tutor speaking", reconnecting: "Reconnecting…" };
+	function toggleLive() {
+		if (!s) return;
+		if (liveOn) return stopLive();
+		localErr = "";
+		if (voice.recording) stopRecording().catch(() => {});
+		startLive(s, {
+			notes: note?.content ?? "",
+			onLab: openLab,
+			onError: (m) => {
+				localErr = `Live voice stopped: ${m} Push-to-talk still works.`;
+				if (!voice.on) toggleVoice();
+			},
+		});
 	}
 
 	function say(content: string, extra = "") {
@@ -252,7 +275,7 @@
 
 	function submit(e: Event) {
 		e.preventDefault();
-		answer(text);
+		if (!(liveOn && sendLiveText(text))) answer(text);
 		text = "";
 	}
 
@@ -283,7 +306,7 @@
 	// The kickoff message waits for its first answer.
 	onMount(() => {
 		if (lastIsUser && !busy) run();
-		return () => (stopSpeaking(), voice.recording && stopRecording().catch(() => {}));
+		return () => (stopSpeaking(), stopLive(), voice.recording && stopRecording().catch(() => {}));
 	});
 
 	$effect(() => {
@@ -304,8 +327,8 @@
 	<div class="grid grid-cols-1 gap-4 lg:h-[calc(100svh-4.5rem)] lg:grid-cols-2">
 		<!-- Lesson -->
 		<section class="flex h-[80svh] min-h-0 min-w-0 flex-col rounded-xl border lg:h-auto">
-			<header class="flex items-center gap-2 border-b px-4 py-2.5">
-				<h1 class="flex-1 truncate font-semibold">{s.topic}</h1>
+			<header class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2.5">
+				<h1 class="min-w-48 flex-1 truncate font-semibold" title={s.topic}>{s.topic}</h1>
 				<Button
 					size="sm"
 					variant={grounding ? "secondary" : "ghost"}
@@ -324,6 +347,17 @@
 				>
 					{#if voice.on}<Volume2 /> Voice on{:else}<VolumeOff /> Voice off{/if}
 				</Button>
+				{#if canLive}
+					<Button
+						size="sm"
+						variant={liveOn ? "secondary" : "ghost"}
+						aria-pressed={liveOn}
+						title={liveOn ? "End the live voice call" : "Talk with the tutor in real time (you can interrupt it)"}
+						onclick={toggleLive}
+					>
+						<AudioLines /> Live
+					</Button>
+				{/if}
 				<Button
 					size="sm"
 					variant="ghost"
@@ -334,6 +368,26 @@
 					{#if finishing}<LoaderCircle class="animate-spin" /> Summarizing…{:else}<Flag /> {s.summary ? "Update summary" : "Finish session"}{/if}
 				</Button>
 			</header>
+			{#if liveOn}
+				<div class="flex items-center gap-3 border-b px-4 py-1.5 text-xs">
+					<span
+						class="size-2 shrink-0 rounded-full {live.status === 'speaking' ? 'bg-primary motion-safe:animate-pulse' : live.status === 'listening' ? 'bg-emerald-500' : 'bg-amber-500 motion-safe:animate-pulse'}"
+						aria-hidden="true"
+					></span>
+					<span role="status" class="font-medium">{LIVE_LABEL[live.status]}</span>
+					<!-- Mic level: width tracks the learner's voice, so they can see they're being heard. -->
+					<span class="bg-muted h-1.5 w-24 overflow-hidden rounded-full" aria-hidden="true" title="Microphone level">
+						<span class="bg-foreground/60 block h-full motion-safe:transition-[width] motion-safe:duration-75" style:width="{Math.round(live.level * 100)}%"></span>
+					</span>
+					<span class="flex-1"></span>
+					{#if live.status === "speaking"}
+						<Button size="sm" variant="outline" class="h-7 px-2 text-xs" onclick={interruptLive} title="Stop the tutor talking so you can speak">
+							<Hand /> Interrupt
+						</Button>
+					{/if}
+					<Button size="sm" variant="destructive" class="h-7 px-2 text-xs" onclick={stopLive}><Square /> Stop</Button>
+				</div>
+			{/if}
 			{#if finished}
 				<div role="status" class="text-muted-foreground flex items-center gap-2 border-b px-4 py-1.5 text-xs">
 					<span class="flex-1">{finished}</span>
@@ -479,16 +533,16 @@
 						bind:value={text}
 						rows={2}
 						class="max-h-40 min-h-0 flex-1 resize-none"
-						placeholder={voice.recording ? "Listening… tap Done when you're finished" : voice.transcribing ? "Transcribing…" : "Answer from memory, or ask a question…"}
+						placeholder={liveOn ? "Live call on: just talk, or type here" : voice.recording ? "Listening… tap Done when you're finished" : voice.transcribing ? "Transcribing…" : "Answer from memory, or ask a question…"}
 						disabled={voice.recording || voice.transcribing}
 						aria-label="Message the trainer"
-						onkeydown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), answer(text), (text = ""))}
+						onkeydown={(e) => e.key === "Enter" && !e.shiftKey && submit(e)}
 					/>
 					<Button
 						type="button"
 						size={voice.recording ? "default" : "icon"}
 						variant={voice.recording ? "destructive" : "outline"}
-						disabled={busy || voice.transcribing}
+						disabled={busy || voice.transcribing || liveOn}
 						aria-label={voice.recording ? "Stop recording" : "Answer by voice"}
 						title={voice.recording ? "Stop and put what you said in the box" : "Answer by voice"}
 						onclick={mic}
