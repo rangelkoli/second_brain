@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { untrack } from "svelte";
+	import { flip } from "svelte/animate";
+	import { cubicOut } from "svelte/easing";
+	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import ChevronLeft from "@lucide/svelte/icons/chevron-left";
 	import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -90,6 +94,21 @@
 	});
 
 	const codeLines = $derived(algorithm.code ? algorithm.code.split("\n") : []);
+	const activeLine = $derived(preset === "demo" ? currentStep.codeLine : undefined);
+
+	// Give each value a stable identity across steps so swapped bars slide (FLIP) instead of repainting in place.
+	let items = $state<{ id: number; val: number }[]>([]);
+	let nextId = 0;
+	$effect(() => {
+		const arr = currentArray;
+		untrack(() => {
+			const pool = [...items];
+			items = arr.map((val) => {
+				const i = pool.findIndex((p) => p.val === val);
+				return i >= 0 ? pool.splice(i, 1)[0] : { id: nextId++, val };
+			});
+		});
+	});
 </script>
 
 <div class="space-y-4">
@@ -129,7 +148,7 @@
 	</div>
 
 	<!-- Bars Visualizer -->
-	<div class="bg-card rounded-lg border p-4">
+	<div class="lab-stage p-4">
 		<div class="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs">
 			<span class="font-medium">{algorithm.name}</span>
 			<div class="flex items-center gap-3 tabular-nums">
@@ -139,24 +158,32 @@
 		</div>
 
 		<div class="flex h-44 items-end justify-center gap-2 border-b pb-2">
-			{#each currentArray as val, idx}
+			{#each items as item, idx (item.id)}
 				{@const isComparing = currentStep.comparing && (currentStep.comparing[0] === idx || currentStep.comparing[1] === idx)}
 				{@const isSorted = typeof currentStep.sortedFrom === "number" && idx >= currentStep.sortedFrom}
-				{@const heightPct = Math.max(14, (Math.abs(val) / maxVal) * 100)}
-				<div class="flex h-full flex-1 max-w-14 flex-col items-center justify-end gap-1">
-					<span class="text-xs font-semibold tabular-nums">{val}</span>
+				{@const heightPct = Math.max(14, (Math.abs(item.val) / maxVal) * 100)}
+				<div
+					class="flex h-full max-w-14 flex-1 flex-col items-center justify-end gap-1"
+					animate:flip={{ duration: prefersReducedMotion.current ? 0 : 520, easing: cubicOut }}
+				>
+					<span
+						class="text-xs font-semibold tabular-nums transition-transform duration-300 ease-out {isComparing ? '-translate-y-2' : ''}"
+						>{item.val}</span
+					>
 					<div
 						style="height: {heightPct}%;"
-						class="w-full rounded-t-md transition-all duration-300 {isComparing
-							? currentStep.swapped
-								? 'bg-amber-500 ring-2 ring-amber-400/60'
-								: 'bg-primary ring-2 ring-primary/40'
+						class="w-full rounded-t-md transition-[background-color,transform,box-shadow] duration-300 ease-out {isComparing
+							? `-translate-y-2 shadow-md ${currentStep.swapped ? 'bg-amber-500' : 'bg-primary'}`
 							: isSorted
 								? 'bg-emerald-500/85'
 								: 'bg-muted-foreground/35'}"
 					></div>
-					<span class="text-muted-foreground text-[10px] tabular-nums">[{idx}]</span>
 				</div>
+			{/each}
+		</div>
+		<div class="mt-1 flex justify-center gap-2">
+			{#each items as _, idx}
+				<span class="text-muted-foreground max-w-14 flex-1 text-center text-[10px] tabular-nums">[{idx}]</span>
 			{/each}
 		</div>
 
@@ -173,7 +200,14 @@
 			<div class="text-muted-foreground flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-medium">
 				<Code2 class="size-3.5" /> {algorithm.language ?? "code"}
 			</div>
-			<pre class="overflow-x-auto p-3 font-mono text-xs leading-5">{#each codeLines as line, li}{@const lineNo = li + 1}{@const active = preset === "demo" && currentStep.codeLine === lineNo}<div class="flex gap-3 rounded px-1.5 {active ? 'bg-primary/15 text-foreground font-semibold' : 'text-muted-foreground'}"><span class="w-5 shrink-0 select-none text-right opacity-50">{lineNo}</span><span class="whitespace-pre">{line}</span></div>{/each}</pre>
+			<div class="relative overflow-x-auto">
+				<!-- One highlight bar that slides to the active line -->
+				<div
+					class="bg-primary/10 pointer-events-none absolute inset-x-1.5 top-3 h-5 rounded transition-[transform,opacity] duration-300 ease-out"
+					style="transform: translateY({((activeLine ?? 1) - 1) * 20}px); opacity: {activeLine ? 1 : 0};"
+				></div>
+				<pre class="relative p-3 font-mono text-xs leading-5">{#each codeLines as line, li}{@const lineNo = li + 1}{@const active = activeLine === lineNo}<div class="flex gap-3 px-1.5 transition-colors duration-300 {active ? 'text-foreground font-semibold' : 'text-muted-foreground'}"><span class="w-5 shrink-0 select-none text-right opacity-50">{lineNo}</span><span class="whitespace-pre">{line}</span></div>{/each}</pre>
+			</div>
 		</div>
 	{/if}
 </div>

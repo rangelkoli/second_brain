@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { fly } from "svelte/transition";
+	import { cubicOut } from "svelte/easing";
+	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import Volume2 from "@lucide/svelte/icons/volume-2";
 	import LoaderCircle from "@lucide/svelte/icons/loader-circle";
@@ -36,16 +39,23 @@
 			{@const active = hl.has(item.word.toLowerCase())}
 			{@const key = `lang-word-${idx}`}
 			<div
-				class="bg-card flex flex-col justify-between gap-2 rounded-lg border p-3 transition-all {active
-					? 'border-primary ring-primary/30 ring-2'
+				class="bg-card flex flex-col justify-between gap-2 rounded-lg border p-3 transition-[opacity,transform,box-shadow,border-color] duration-300 ease-out {active
+					? 'border-foreground/40 -translate-y-1 shadow-md'
 					: hl.size
-						? 'opacity-70'
+						? 'opacity-60'
 						: ''}"
 			>
 				<div class="flex items-start justify-between gap-2">
-					<div>
-						<div class="text-base font-bold tracking-tight">{item.word}</div>
-						<div class="text-primary text-xs font-mono">{item.pronunciation}</div>
+					<div class="grid">
+						{#key active}
+							<div
+								class="[grid-area:1/1]"
+								in:fly={{ y: prefersReducedMotion.current || !active ? 0 : 8, duration: prefersReducedMotion.current || !active ? 0 : 380, easing: cubicOut }}
+							>
+								<div class="text-base font-bold tracking-tight">{item.word}</div>
+								<div class="text-xs {active ? 'text-foreground font-medium' : 'text-muted-foreground'}">{item.pronunciation}</div>
+							</div>
+						{/key}
 					</div>
 					<Button
 						size="sm"

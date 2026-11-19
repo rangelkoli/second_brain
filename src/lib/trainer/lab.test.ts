@@ -1,7 +1,7 @@
 // @ts-nocheck -- plain node script, outside the app build
 // Run: node src/lib/trainer/lab.test.ts
 import assert from "node:assert";
-import { inferSubjectTheme, parseTutorResponse, wrapSketchHtml } from "./lab.ts";
+import { LAB_PROMPT, SKETCH_CSP, inferSubjectTheme, parseTutorResponse, wrapSketchHtml } from "./lab.ts";
 
 // 1. Plain text fallback when model doesn't emit JSON
 assert.deepStrictEqual(parseTutorResponse("Hello! Why does TCP need three steps?"), {
@@ -61,8 +61,28 @@ assert.strictEqual(brokenLab.lab, undefined);
 
 // 5. Sketch HTML wrapper injects theme & step listener
 const wrapped = wrapSketchHtml('<svg><rect data-step="0" /></svg>', true);
-assert.ok(wrapped.includes("--bg:#141417"));
+assert.ok(wrapped.includes("--bg:#151515"));
+assert.ok(wrapSketchHtml("<svg></svg>", false).includes("--bg:#fafafa"));
 assert.ok(wrapped.includes("lab:step"));
+assert.ok(wrapped.includes('<rect data-step="0" />'));
+// CSP: no network, inline only
+assert.ok(wrapped.includes(`<meta http-equiv="Content-Security-Policy" content="${SKETCH_CSP}" />`));
+assert.ok(SKETCH_CSP.startsWith("default-src 'none'") && !/connect-src/.test(SKETCH_CSP));
+// backward-compatible runtime API + declarative primitives
+for (const hook of ["onStep", "playTone", "window.setStep", "data-draw", "data-flow", "data-pulse", "data-count", "data-move", "data-chip", "data-delay", "prefers-reduced-motion"]) {
+	assert.ok(wrapped.includes(hook), `runtime missing ${hook}`);
+}
+// regexes in the runtime must keep their backslashes through the template string (\d not d)
+assert.ok(!/[/(]d\+/.test(wrapped), "runtime regex lost an escape");
+assert.ok(wrapped.includes("/\\d+/g"));
+// runtime script must be valid JS after template escaping
+new Function(/<script>([\s\S]*)<\/script>/.exec(wrapped)[1]);
+
+// 5b. Lab authoring prompt documents the primitives and has an example sketch
+assert.ok(LAB_PROMPT.startsWith('HOW TO BUILD "lab"'));
+for (const k of ["data-draw", "data-flow", "data-move", "data-pulse", "data-count", "data-chip", "viewBox='0 0 600 340'"]) {
+	assert.ok(LAB_PROMPT.includes(k), `prompt missing ${k}`);
+}
 
 // 6. Subject theme inference
 assert.strictEqual(inferSubjectTheme("B minor scale"), "music");

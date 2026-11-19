@@ -238,7 +238,7 @@
 				{@const isCurrent = (playing ? activeBeat : step.chordIndex ?? 0) === ci}
 				<button
 					type="button"
-					class="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors {isCurrent ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:bg-accent'}"
+					class="rounded-md border px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] {isCurrent ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:bg-accent'}"
 					onclick={() => ch.notes.forEach((n, idx) => setTimeout(() => playTone(n, 0.7, 0.12), idx * 25))}
 				>
 					{ch.name}
@@ -272,14 +272,16 @@
 						{#if info.pitch.includes("#") || info.pitch.includes("b")}
 							<text x={x - 14} y={y + 4} class="fill-muted-foreground text-[11px] font-semibold">{info.pitch.slice(1)}</text>
 						{/if}
-						<ellipse
-							cx={x}
-							cy={y}
-							rx="6.5"
-							ry="4.8"
-							transform="rotate(-15 {x} {y})"
-							class={active ? "fill-primary stroke-primary" : "fill-foreground/85"}
-						/>
+						<g class="note-head" class:on={active} style="transform-origin: {x}px {y}px;">
+							<ellipse
+								cx={x}
+								cy={y}
+								rx="6.5"
+								ry="4.8"
+								transform="rotate(-15 {x} {y})"
+								class={active ? "fill-primary stroke-primary" : "fill-foreground/85"}
+							/>
+						</g>
 						<text x={x} y="104" text-anchor="middle" class="fill-muted-foreground text-[10px]">{info.pitch}</text>
 					</g>
 				{/each}
@@ -310,7 +312,7 @@
 	</div>
 
 	<!-- Playable 2-Octave Piano Keyboard -->
-	<div class="bg-card overflow-x-auto rounded-lg border p-3">
+	<div class="lab-stage overflow-x-auto p-3">
 		<div class="relative mx-auto h-32 min-w-[460px] select-none">
 			<div class="flex h-full gap-0.5">
 				{#each whiteKeys as wk}
@@ -318,7 +320,9 @@
 					{@const inScale = scalePitchSet.has(wk.pitch)}
 					<button
 						type="button"
-						class="relative flex flex-1 flex-col items-center justify-end rounded-b-md border pb-1.5 text-[10px] font-medium transition-colors {isHighlight
+						class="piano-key relative flex flex-1 flex-col items-center justify-end rounded-b-md border pb-1.5 text-[10px] font-medium {isHighlight
+							? 'pressed'
+							: ''} {isHighlight
 							? 'bg-primary text-primary-foreground border-primary'
 							: inScale
 								? 'bg-accent text-accent-foreground hover:bg-accent/80'
@@ -343,7 +347,9 @@
 					<button
 						type="button"
 						style="left: calc({((wi + 1) / whiteKeys.length) * 100}% - 13px);"
-						class="absolute top-0 z-10 flex h-20 w-6.5 flex-col items-center justify-end rounded-b-md border pb-1 text-[9px] font-semibold shadow-sm transition-colors {isHighlight
+						class="piano-key absolute top-0 z-10 flex h-20 w-6.5 flex-col items-center justify-end rounded-b-md border pb-1 text-[9px] font-semibold shadow-sm {isHighlight
+							? 'pressed'
+							: ''} {isHighlight
 							? 'bg-primary text-primary-foreground border-primary'
 							: inScale
 								? 'bg-zinc-700 text-white ring-2 ring-primary/60'
@@ -357,3 +363,27 @@
 		</div>
 	</div>
 </div>
+
+<style>
+	/* Keys sink when pressed or highlighted; quick down, slightly slower release. */
+	.piano-key {
+		transform-origin: top;
+		transition:
+			background-color 150ms ease-out,
+			color 150ms ease-out,
+			transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+			box-shadow 220ms ease-out;
+	}
+	.piano-key.pressed,
+	.piano-key:active {
+		transform: scaleY(0.975) translateY(1px);
+		box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.18);
+		transition-duration: 90ms;
+	}
+	.note-head {
+		transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+	}
+	.note-head.on {
+		transform: scale(1.3);
+	}
+</style>

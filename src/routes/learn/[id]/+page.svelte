@@ -124,6 +124,22 @@
 		run();
 	}
 
+	// A lab check finished while the tutor is still replying: hold it and send once the reply lands.
+	let queuedCheck = $state<{ id: string; summary: string } | null>(null);
+	function reportCheck(summary: string) {
+		if (!s) return false;
+		if (busy) queuedCheck = { id, summary };
+		else say(summary);
+		return true;
+	}
+	$effect(() => {
+		if (!busy && queuedCheck?.id === id) {
+			const { summary } = queuedCheck;
+			queuedCheck = null;
+			say(summary);
+		}
+	});
+
 	function submit(e: Event) {
 		e.preventDefault();
 		say(text);
@@ -320,7 +336,7 @@
 
 			<div class="min-h-0 flex-1 overflow-y-auto p-4" class:hidden={tab !== "lab"}>
 				{#if activeLab}
-					<LabPlayer lab={activeLab} onCheckComplete={(summary) => say(summary)} />
+					<LabPlayer lab={activeLab} onCheckComplete={reportCheck} />
 				{:else}
 					<div class="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 text-center text-sm">
 						<Sparkles class="size-6 opacity-40" />

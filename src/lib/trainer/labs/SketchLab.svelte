@@ -2,7 +2,7 @@
 	import { onMount } from "svelte";
 	import { wrapSketchHtml, type LabStep, type SketchPayload } from "../lab";
 
-	let { sketch, stepIndex, step }: { sketch: SketchPayload; stepIndex: number; step: LabStep } = $props();
+	let { sketch, stepIndex, step, stepCount }: { sketch: SketchPayload; stepIndex: number; step: LabStep; stepCount: number } = $props();
 
 	let iframe = $state<HTMLIFrameElement>();
 	let dark = $state(false);
@@ -20,7 +20,7 @@
 	const srcdoc = $derived(wrapSketchHtml(sketch.html, dark));
 
 	function pushStep() {
-		iframe?.contentWindow?.postMessage({ type: "lab:step", stepIndex, step: JSON.parse(JSON.stringify(step)) }, "*");
+		iframe?.contentWindow?.postMessage({ type: "lab:step", stepIndex, stepCount, step: JSON.parse(JSON.stringify(step)) }, "*");
 	}
 
 	$effect(() => {
@@ -30,13 +30,13 @@
 	});
 </script>
 
-<div class="bg-card overflow-hidden rounded-lg border">
+<div class="lab-stage overflow-hidden">
 	<iframe
 		bind:this={iframe}
 		title="Interactive visual sketch"
 		sandbox="allow-scripts"
 		{srcdoc}
 		onload={pushStep}
-		class="h-[360px] w-full border-0"
+		class="block aspect-[600/364] max-h-[480px] min-h-[260px] w-full border-0 bg-transparent"
 	></iframe>
 </div>

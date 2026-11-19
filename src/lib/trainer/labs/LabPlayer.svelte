@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
+	import { fade, fly } from "svelte/transition";
+	import { cubicOut } from "svelte/easing";
+	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { Badge } from "$lib/components/ui/badge/index.js";
 	import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -21,7 +24,8 @@
 	import ImageLab from "./ImageLab.svelte";
 	import SketchLab from "./SketchLab.svelte";
 
-	let { lab, onCheckComplete }: { lab: Lab; onCheckComplete?: (summary: string) => void } = $props();
+	// onCheckComplete returns true when the parent accepted (sent or queued) the report.
+	let { lab, onCheckComplete }: { lab: Lab; onCheckComplete?: (summary: string) => boolean } = $props();
 
 	let stepIndex = $state(0);
 	let playing = $state(false);
@@ -76,6 +80,11 @@
 	});
 
 	const step = $derived(lab.steps[stepIndex] ?? lab.steps[0]);
+	const STEP_MS = 4000;
+	const rm = $derived(prefersReducedMotion.current);
+	// How long the active progress segment takes to fill: the fixed autoplay delay, or an estimate of the narration.
+	const fillMs = $derived(voice.on ? Math.max(2500, `${step.title} ${step.caption}`.split(/\s+/).length * 380) : STEP_MS);
+	const fillPaused = $derived(voice.on && voice.speaking !== "lab");
 
 	function runCurrentStepNarration() {
 		clearTimer();
@@ -98,7 +107,7 @@
 				timer = setTimeout(advance, 4000);
 			});
 		} else {
-			timer = setTimeout(advance, 4000);
+			timer = setTimeout(advance, STEP_MS);
 		}
 	}
 
@@ -147,23 +156,43 @@
 	);
 
 	function reportCheck(summary: string) {
-		checkReported = true;
-		onCheckComplete?.(summary);
+		if (onCheckComplete?.(summary)) checkReported = true;
+	}
+
+	function onKey(e: KeyboardEvent) {
+		if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+		const t = e.target as HTMLElement;
+		if (t.closest("input, textarea, select, [contenteditable=true]")) return;
+		if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+			e.preventDefault();
+			goToStep(stepIndex + (e.key === "ArrowLeft" ? -1 : 1));
+		} else if (e.key === " " && !t.closest("button, a")) {
+			e.preventDefault();
+			togglePlay();
+		}
 	}
 </script>
 
-<div class="space-y-4">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions (keyboard-steppable region: arrows, space) -->
+<div
+	class="lab-root focus-visible:ring-ring/50 space-y-3 rounded-xl outline-none focus-visible:ring-[3px]"
+	role="region"
+	aria-label="Lab: {lab.title}"
+	aria-keyshortcuts="ArrowLeft ArrowRight Space"
+	tabindex="0"
+	onkeydown={onKey}
+>
 	<!-- Header & Transport -->
 	<div class="flex flex-wrap items-center justify-between gap-2">
 		<div class="flex min-w-0 items-center gap-2">
 			<h2 class="truncate text-sm font-semibold">{lab.title}</h2>
-			<Badge variant="secondary" class="text-[10px] uppercase">{lab.kind}</Badge>
+			<Badge variant="secondary" class="text-[10px] capitalize">{lab.kind}</Badge>
 		</div>
 		<div class="flex items-center gap-1">
-			<Button size="sm" variant="outline" class="h-7 px-2" disabled={stepIndex <= 0} onclick={() => goToStep(stepIndex - 1)} aria-label="Previous step">
+			<Button size="sm" variant="outline" class="h-7 px-2" disabled={stepIndex <= 0} onclick={() => goToStep(stepIndex - 1)} aria-label="Previous step" title="Previous step (←)">
 				<ChevronLeft class="size-3.5" />
 			</Button>
-			<Button size="sm" variant={playing ? "secondary" : "default"} class="h-7 px-2.5 text-xs" onclick={togglePlay}>
+			<Button size="sm" variant={playing ? "secondary" : "default"} class="h-7 w-[4.5rem] px-2.5 text-xs" onclick={togglePlay} title="Play or pause (Space)">
 				{#if playing}<Pause class="size-3.5" /> Pause{:else}<Play class="size-3.5" /> Play{/if}
 			</Button>
 			<Button
@@ -173,41 +202,66 @@
 				disabled={stepIndex >= lab.steps.length - 1}
 				onclick={() => goToStep(stepIndex + 1)}
 				aria-label="Next step"
+				title="Next step (→)"
 			>
 				<ChevronRight class="size-3.5" />
 			</Button>
-			<span class="text-muted-foreground ml-1 text-xs tabular-nums">{stepIndex + 1}/{lab.steps.length}</span>
+			<span class="text-muted-foreground ml-1 min-w-8 text-right text-xs tabular-nums">{stepIndex + 1}/{lab.steps.length}</span>
 		</div>
 	</div>
 
-	<!-- Step Progress Segments -->
+	<!-- Step Progress Segments: the active one fills over the step's duration while autoplaying -->
 	{#if lab.steps.length > 1}
-		<div class="flex gap-1">
+		<div class="-my-1.5 flex gap-1">
 			{#each lab.steps as st, idx}
 				<button
 					type="button"
 					title={st.title}
 					aria-label="Go to step {idx + 1}: {st.title}"
-					class="h-1.5 flex-1 rounded-full transition-colors {idx === stepIndex
-						? 'bg-primary'
-						: idx < stepIndex
-							? 'bg-primary/45'
-							: 'bg-muted hover:bg-muted-foreground/30'}"
+					aria-current={idx === stepIndex ? "step" : undefined}
+					class="group flex-1 py-1.5"
 					onclick={() => goToStep(idx)}
-				></button>
+				>
+					<span class="bg-muted group-hover:bg-muted-foreground/25 relative block h-1.5 overflow-hidden rounded-full transition-colors">
+						{#if idx === stepIndex && playing && !rm}
+							{#key stepIndex}
+								<span
+									class="seg-fill bg-foreground absolute inset-0 origin-left rounded-full"
+									style="animation-duration: {fillMs}ms; animation-play-state: {fillPaused ? 'paused' : 'running'};"
+								></span>
+							{/key}
+						{:else}
+							<span
+								class="absolute inset-0 origin-left rounded-full transition-transform duration-300 ease-out {idx === stepIndex
+									? 'bg-foreground scale-x-100'
+									: idx < stepIndex
+										? 'bg-foreground/35 scale-x-100'
+										: 'bg-foreground/35 scale-x-0'}"
+							></span>
+						{/if}
+					</span>
+				</button>
 			{/each}
 		</div>
 	{/if}
 
-	<!-- Active Step Caption -->
-	<div class="bg-muted/40 flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5">
-		<div class="min-w-0 space-y-0.5">
-			<div class="text-xs font-semibold">{step.title}</div>
-			{#if step.caption}
-				<p class="text-muted-foreground text-xs leading-relaxed">{step.caption}</p>
-			{/if}
+	<!-- Active Step Caption (crossfades between steps) -->
+	<div class="bg-card flex items-start justify-between gap-3 rounded-lg border px-3.5 py-3">
+		<div class="grid min-h-16 min-w-0 flex-1 content-start" aria-live="polite">
+			{#key stepIndex}
+				<div
+					class="min-w-0 space-y-1 [grid-area:1/1]"
+					in:fly={{ y: rm ? 0 : 6, duration: rm ? 0 : 320, delay: rm ? 0 : 60, easing: cubicOut }}
+					out:fade={{ duration: rm ? 0 : 120 }}
+				>
+					<div class="text-sm font-semibold text-balance">{step.title}</div>
+					{#if step.caption}
+						<p class="text-muted-foreground text-[13px] leading-relaxed text-pretty">{step.caption}</p>
+					{/if}
+				</div>
+			{/key}
 			{#if audioErr}
-				<p class="text-destructive text-[11px]">{audioErr}</p>
+				<p class="text-destructive mt-1 text-[11px]">{audioErr}</p>
 			{/if}
 		</div>
 		<Button
@@ -242,7 +296,7 @@
 	{:else if lab.kind === "image" && lab.image}
 		<ImageLab image={lab.image} {step} />
 	{:else if lab.kind === "sketch" && lab.sketch}
-		<SketchLab sketch={lab.sketch} {stepIndex} {step} />
+		<SketchLab sketch={lab.sketch} {stepIndex} {step} stepCount={lab.steps.length} />
 	{/if}
 
 	<!-- Interactive Check -->
@@ -358,3 +412,19 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.seg-fill {
+		animation-name: seg-fill;
+		animation-timing-function: linear;
+		animation-fill-mode: both;
+	}
+	@keyframes seg-fill {
+		from {
+			transform: scaleX(0);
+		}
+		to {
+			transform: scaleX(1);
+		}
+	}
+</style>

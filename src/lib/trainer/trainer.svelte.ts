@@ -4,7 +4,7 @@ import { MarkdownManager } from "@tiptap/markdown";
 import { addTodo, createNote, getNote, updateNote } from "$lib/store.svelte";
 import { auth, pb } from "$lib/sync.svelte";
 import { reviewDates } from "./reviews";
-import { parseTutorResponse, searchWikimediaImage, type Lab } from "./lab";
+import { LAB_PROMPT, parseTutorResponse, searchWikimediaImage, type Lab } from "./lab";
 import { BUILTIN_CURRICULA, parseCurriculumJson, type CurriculumSubject } from "./curriculum";
 
 // AI trainer: Gemini teaches in short plain-language chunks with retrieval questions,
@@ -156,36 +156,7 @@ How you teach (evidence-based):
 
 Each user turn includes the learner's current notes (markdown), any active lab summary, and—if they drew anything—a snapshot of their whiteboard. When asked to review notes/whiteboard, point at actual things in them: what's right, what's wrong, what's missing, and one improvement (no need for a new lab during a notes review). Otherwise mention notes/whiteboard only if something is wrong.
 
-HOW TO BUILD "lab" (step-by-step interactive visual):
-Every lab has: { "title": string, "kind": one of "music"|"geometry"|"algorithm"|"physics"|"language"|"image"|"sketch", "summary": string, "steps": [{ "title": string, "caption": string, ...stepFields }], "check"?: ... }
-- Keep steps focused (3–6 steps). Each step's "caption" is 1–2 short spoken sentences synced to what highlights in that step.
-- Pick the best "kind":
-  1) "music": scales, intervals, key signatures, chord progressions, rhythm.
-     music: { "mode": "scale"|"progression", "root": "B", "scaleName": "B Natural Minor", "notes": ["B4","C#5","D5","E5","F#5","G5","A5","B5"], "chords": [{"name":"Bm","notes":["B3","D4","F#4"]}], "bpm": 96, "drums": false, "drumVolume": 42, "relativeMajor": "D", "sharpsOrFlats": "2 sharps (F#, C#)" }
-     Step fields: "highlight": ["B4","C#5"], "chordIndex": 0.
-     If the user asks to "build a chord progression" or "add drums", return an updated "music" lab preserving the scale/key!
-  2) "geometry": right triangles, Pythagorean theorem, triangle ratios.
-     geometry: { "shape": "pythagorean"|"triangle", "a": 3, "b": 4, "c": 5, "labels": {"a":"a = 3","b":"b = 4","c":"c = 5"}, "showSquares": true }
-     Step fields: "highlight": ["right-angle"|"hypotenuse"|"legs"|"squares"|"equation"].
-  3) "algorithm": sorting/array algorithms with live step-by-step animation + code line highlight.
-     algorithm: { "name": "Bubble Sort", "initialArray": [4,3,2,1], "language": "python", "code": "for i in range(n):\\n  ..." }
-     Step fields: "array": [3,4,2,1], "comparing": [0,1], "swapped": true, "sortedFrom": 3, "codeLine": 3.
-  4) "physics": projectile motion, angles, velocity vectors.
-     physics: { "scenario": "projectile", "angle": 30, "speed": 20, "gravity": 9.81, "showVectors": true }
-     Step fields: "angle": 30, "speed": 20, "t": 0.5 (0=launch, 0.5=peak, 1=land).
-  5) "language": vocabulary, pronunciation, stress guides.
-     language: { "languageName": "Romanian", "items": [{ "word": "Salut", "pronunciation": "sa-LUT", "meaning": "Hi / Hello", "tip": "Stress the second syllable.", "example": "Salut, Ana!", "exampleTranslation": "Hi, Ana!" }] }
-     Step fields: "highlight": ["Salut"]. Include a "match" check when teaching 3+ words!
-  6) "image": real-world visual topics (cars, paintings, landmarks, anatomy, instruments) where a real photo + callout boxes helps.
-     image: { "query": "1965 Shelby GT350 Mustang", "annotations": [{ "id": "hood", "label": "Hood scoop", "x": 30, "y": 42, "w": 24, "h": 18 }] } (x,y,w,h in 0–100%).
-     Step fields: "annotationIds": ["hood"].
-  7) "sketch": ANY other topic (breadboard LED wiring, biology cell, TCP handshake packets, CPU pipeline, chemistry, etc.)!
-     sketch: { "html": "<svg viewBox='0 0 600 320'>...</svg>" }
-     Use CSS vars (--bg, --fg, --muted, --card, --border, --accent, --ok, --warn, --danger) and put data-step="0" or data-steps="0,1" on SVG/HTML elements so stepping dims inactive parts and lights up active parts! Keep scripts small and clean if needed (window.LAB.onStep((i, step) => ...), window.LAB.playTone(freq)).
-
-Optional "check" inside "lab" (great for quick prediction or vocab matching before moving on):
-- { "kind": "predict", "prompt": "...", "options": ["...","..."], "answerIndex": 0, "explanation": "..." }
-- { "kind": "match", "prompt": "Match the pairs", "pairs": [{"left":"Salut","right":"Hi"}] }`;
+${LAB_PROMPT}`;
 
 // Gemini goes through the sync server (pocketbase/pb_hooks/gemini.pb.js), which holds GEMINI_API_KEY.
 async function call(model: string, body: object) {

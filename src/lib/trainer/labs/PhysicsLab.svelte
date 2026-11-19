@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onDestroy } from "svelte";
+	import { onDestroy, untrack } from "svelte";
+	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import Play from "@lucide/svelte/icons/play";
 	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
@@ -15,11 +16,26 @@
 
 	const g = $derived(physics.gravity ?? 9.81);
 
+	// A new step flies the ball from where it is to the step's t (from launch if the shot itself changed).
+	let arrived = false;
 	$effect(() => {
-		angle = step.angle ?? physics.angle;
-		speed = step.speed ?? physics.speed;
-		progress = typeof step.t === "number" ? step.t : 0.5;
-		stopAnim();
+		const st = step;
+		untrack(() => {
+			const nextAngle = st.angle ?? physics.angle;
+			const nextSpeed = st.speed ?? physics.speed;
+			const newShot = !arrived || nextAngle !== angle || nextSpeed !== speed;
+			angle = nextAngle;
+			speed = nextSpeed;
+			stopAnim();
+			const target = typeof st.t === "number" ? st.t : 0.5;
+			if (prefersReducedMotion.current) {
+				progress = target;
+				arrived = true;
+				return;
+			}
+			flyTo(newShot ? 0 : progress, target);
+			arrived = true;
+		});
 	});
 
 	function metrics(angDeg: number, v0: number) {
@@ -68,7 +84,14 @@
 		const yNow = Math.max(0, cur.vy0 * tNow - 0.5 * g * tNow * tNow);
 		const vyNow = cur.vy0 - g * tNow;
 
+		const posAt = (p: number) => {
+			const t = Math.max(0, p) * cur.flightTime;
+			return { x: toX(cur.vx * t), y: toY(Math.max(0, cur.vy0 * t - 0.5 * g * t * t)) };
+		};
+		const trail = animating ? [1, 2, 3, 4, 5, 6].map((k) => ({ ...posAt(progress - k * 0.022 * flightDir), o: 0.42 - k * 0.06, r: 5.5 - k * 0.55 })) : [];
+
 		return {
+			trail,
 			groundY,
 			toX,
 			toY,
@@ -89,18 +112,55 @@
 	});
 
 	let raf: number | null = null;
+	let flightDir = $state(1);
+	let vectors = $state<SVGGElement>();
 	function stopAnim() {
 		if (raf !== null) cancelAnimationFrame(raf);
 		raf = null;
 		animating = false;
 	}
 
+	// Real time for a full flight, squeezed into a watchable 1.1–3.2 s.
+	const fullFlightMs = () => Math.max(1100, Math.min(3200, cur.flightTime * 550));
+
+	function growVectors() {
+		if (!vectors || prefersReducedMotion.current) return;
+		vectors.style.transformOrigin = `${arena.ballX}px ${arena.ballY}px`;
+		vectors.animate([{ scale: "0", opacity: 0 }, { scale: "1", opacity: 1 }], { duration: 420, easing: "cubic-bezier(0.16, 1, 0.3, 1)" });
+	}
+
+	function flyTo(from: number, to: number) {
+		if (Math.abs(to - from) < 0.001) {
+			progress = to;
+			growVectors();
+			return;
+		}
+		flightDir = to >= from ? 1 : -1;
+		animating = true;
+		progress = from;
+		// Rewinding is quicker than flying forward.
+		const durMs = Math.max(260, Math.abs(to - from) * fullFlightMs() * (flightDir > 0 ? 1 : 0.5));
+		const start = performance.now();
+		const frame = (now: number) => {
+			const k = Math.min(1, (now - start) / durMs);
+			progress = from + (to - from) * k; // linear: the ball keeps physical time
+			if (k < 1 && animating) raf = requestAnimationFrame(frame);
+			else {
+				animating = false;
+				raf = null;
+				growVectors();
+			}
+		};
+		raf = requestAnimationFrame(frame);
+	}
+
 	function launch() {
 		if (animating) return stopAnim();
+		flightDir = 1;
 		animating = true;
 		progress = 0;
 		const start = performance.now();
-		const durMs = Math.max(1100, Math.min(3200, cur.flightTime * 550));
+		const durMs = fullFlightMs();
 		const frame = (now: number) => {
 			const p = Math.min(1, (now - start) / durMs);
 			progress = p;
@@ -108,6 +168,7 @@
 			else {
 				animating = false;
 				raf = null;
+				growVectors();
 			}
 		};
 		raf = requestAnimationFrame(frame);
@@ -160,7 +221,7 @@
 	</div>
 
 	<!-- Trajectory Arena -->
-	<div class="bg-card overflow-hidden rounded-lg border p-2">
+	<div class="lab-stage overflow-hidden p-2">
 		<svg viewBox="0 0 460 240" class="w-full" aria-label="Projectile motion simulation">
 			<!-- Ground -->
 			<line x1="20" y1={arena.groundY} x2="445" y2={arena.groundY} class="stroke-border" stroke-width="2" />
@@ -187,19 +248,31 @@
 				{cur.range.toFixed(1)}m
 			</text>
 
+			<!-- Motion trail (only while flying) -->
+			{#each arena.trail as dot}
+				<circle cx={dot.x} cy={dot.y} r={Math.max(1.5, dot.r)} class="fill-primary" opacity={Math.max(0, dot.o)} />
+			{/each}
+
 			<!-- Velocity vectors -->
+			<defs>
+				<marker id="vec-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+					<path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
+				</marker>
+			</defs>
 			{#if physics.showVectors !== false}
 				{@const vxLen = Math.max(14, (arena.vx / Math.max(speed, 1)) * 42)}
 				{@const vyLen = (arena.vyNow / Math.max(speed, 1)) * 42}
+				<g bind:this={vectors}>
 				<!-- Vx arrow (horizontal) -->
-				<line x1={arena.ballX} y1={arena.ballY} x2={arena.ballX + vxLen} y2={arena.ballY} class="stroke-blue-500" stroke-width="2" />
+				<line x1={arena.ballX} y1={arena.ballY} x2={arena.ballX + vxLen} y2={arena.ballY} class="stroke-blue-500" stroke-width="2" stroke-linecap="round" marker-end="url(#vec-head)" />
 				<text x={arena.ballX + vxLen + 3} y={arena.ballY + 3} class="fill-blue-600 text-[9px] font-semibold dark:fill-blue-400">Vx</text>
 
 				<!-- Vy arrow (vertical) -->
 				{#if Math.abs(vyLen) > 3}
-					<line x1={arena.ballX} y1={arena.ballY} x2={arena.ballX} y2={arena.ballY - vyLen} class="stroke-rose-500" stroke-width="2" />
+					<line x1={arena.ballX} y1={arena.ballY} x2={arena.ballX} y2={arena.ballY - vyLen} class="stroke-rose-500" stroke-width="2" stroke-linecap="round" marker-end="url(#vec-head)" />
 					<text x={arena.ballX - 16} y={arena.ballY - vyLen} class="fill-rose-600 text-[9px] font-semibold dark:fill-rose-400">Vy</text>
 				{/if}
+				</g>
 			{/if}
 
 			<!-- Projectile ball -->

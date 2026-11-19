@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { untrack } from "svelte";
+	import { fly } from "svelte/transition";
+	import { cubicOut } from "svelte/easing";
+	import { prefersReducedMotion } from "svelte/motion";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 	import type { GeometryPayload, LabStep } from "../lab";
@@ -52,6 +56,57 @@
 
 		return { scale, p0, pA, pB, pC1, pC2, cMid, showSq };
 	});
+
+	// --- Motion: sides draw on, squares grow out of their side, equation terms arrive one by one. ---
+	const PEN = "cubic-bezier(0.65, 0, 0.35, 1)";
+	const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
+	let sideA = $state<SVGLineElement>();
+	let sideB = $state<SVGLineElement>();
+	let sideC = $state<SVGLineElement>();
+	let sqA = $state<SVGGElement>();
+	let sqB = $state<SVGGElement>();
+	let sqC = $state<SVGGElement>();
+	let eqKey = $state(0);
+	let prevHl: Set<string> | null = null;
+
+	function drawSide(el: SVGLineElement | undefined, delay: number) {
+		el?.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: 650, delay, easing: PEN, fill: "backwards" });
+	}
+
+	// Scale along the side's normal, anchored on the side itself, so the square unfolds outward from it.
+	function growSquare(el: SVGGElement | undefined, from: { x: number; y: number }, to: { x: number; y: number }, delay: number) {
+		if (!el) return;
+		const phi = (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+		const at = (s: number) => `translate(${from.x}px, ${from.y}px) rotate(${phi}deg) scaleY(${s}) rotate(${-phi}deg) translate(${-from.x}px, ${-from.y}px)`;
+		el.animate([{ transform: at(0), opacity: 0.4 }, { transform: at(1), opacity: 1 }], { duration: 700, delay, easing: EASE, fill: "backwards" });
+	}
+
+	$effect(() => {
+		const now = hl;
+		untrack(() => {
+			const prev = prevHl;
+			const first = prev === null;
+			const entered = (k: string) => now.has(k) && !prev?.has(k);
+			prevHl = now;
+			if (prefersReducedMotion.current) return;
+			const L = layout;
+			if (first) {
+				drawSide(sideA, 0);
+				drawSide(sideB, 200);
+				drawSide(sideC, 400);
+			} else {
+				if (entered("legs")) (drawSide(sideA, 0), drawSide(sideB, 120));
+				if (entered("hypotenuse")) drawSide(sideC, 0);
+			}
+			if (L.showSq && (entered("squares") || (first && !now.size))) {
+				const d = first ? 700 : 0;
+				growSquare(sqA, L.p0, L.pA, d);
+				growSquare(sqB, L.pB, L.p0, d + 140);
+				growSquare(sqC, L.pA, L.pB, d + 280);
+			}
+			if (entered("equation") || first) eqKey++;
+		});
+	});
 </script>
 
 <div class="space-y-4">
@@ -82,12 +137,12 @@
 	</div>
 
 	<!-- SVG Diagram -->
-	<div class="bg-card overflow-hidden rounded-lg border p-2">
+	<div class="lab-stage overflow-hidden p-2">
 		<svg viewBox="0 0 460 340" class="mx-auto w-full max-w-[480px]" aria-label="Geometry diagram">
 			<!-- Area Squares -->
 			{#if layout.showSq}
 				<!-- Square on side a (left) -->
-				<g class="transition-opacity duration-300" opacity={isHl("squares") || isHl("legs") ? 1 : 0.25}>
+				<g bind:this={sqA} class="transition-opacity duration-300" opacity={isHl("squares") || isHl("legs") ? 1 : 0.25}>
 					<rect
 						x={layout.p0.x - a * layout.scale}
 						y={layout.pA.y}
@@ -107,7 +162,7 @@
 				</g>
 
 				<!-- Square on side b (bottom) -->
-				<g class="transition-opacity duration-300" opacity={isHl("squares") || isHl("legs") ? 1 : 0.25}>
+				<g bind:this={sqB} class="transition-opacity duration-300" opacity={isHl("squares") || isHl("legs") ? 1 : 0.25}>
 					<rect
 						x={layout.p0.x}
 						y={layout.p0.y}
@@ -127,7 +182,7 @@
 				</g>
 
 				<!-- Square on hypotenuse c -->
-				<g class="transition-opacity duration-300" opacity={isHl("squares") || isHl("hypotenuse") ? 1 : 0.25}>
+				<g bind:this={sqC} class="transition-opacity duration-300" opacity={isHl("squares") || isHl("hypotenuse") ? 1 : 0.25}>
 					<polygon
 						points="{layout.pA.x},{layout.pA.y} {layout.pB.x},{layout.pB.y} {layout.pC2.x},{layout.pC2.y} {layout.pC1.x},{layout.pC1.y}"
 						class="fill-amber-500/15 stroke-amber-500/80"
@@ -163,11 +218,15 @@
 
 			<!-- Side a -->
 			<line
+				bind:this={sideA}
+				pathLength="1"
+				stroke-dasharray="1"
+				stroke-linecap="round"
 				x1={layout.p0.x}
 				y1={layout.p0.y}
 				x2={layout.pA.x}
 				y2={layout.pA.y}
-				class="stroke-blue-600 transition-all duration-300 dark:stroke-blue-400"
+				class="stroke-blue-600 transition-[stroke-width,opacity] duration-300 dark:stroke-blue-400"
 				stroke-width={hl.has("legs") ? 3.8 : 2.4}
 				opacity={isHl("legs") ? 1 : 0.45}
 			/>
@@ -181,11 +240,15 @@
 
 			<!-- Side b -->
 			<line
+				bind:this={sideB}
+				pathLength="1"
+				stroke-dasharray="1"
+				stroke-linecap="round"
 				x1={layout.p0.x}
 				y1={layout.p0.y}
 				x2={layout.pB.x}
 				y2={layout.pB.y}
-				class="stroke-emerald-600 transition-all duration-300 dark:stroke-emerald-400"
+				class="stroke-emerald-600 transition-[stroke-width,opacity] duration-300 dark:stroke-emerald-400"
 				stroke-width={hl.has("legs") ? 3.8 : 2.4}
 				opacity={isHl("legs") ? 1 : 0.45}
 			/>
@@ -200,11 +263,15 @@
 
 			<!-- Hypotenuse c -->
 			<line
+				bind:this={sideC}
+				pathLength="1"
+				stroke-dasharray="1"
+				stroke-linecap="round"
 				x1={layout.pA.x}
 				y1={layout.pA.y}
 				x2={layout.pB.x}
 				y2={layout.pB.y}
-				class="stroke-amber-600 transition-all duration-300 dark:stroke-amber-400"
+				class="stroke-amber-600 transition-[stroke-width,opacity] duration-300 dark:stroke-amber-400"
 				stroke-width={hl.has("hypotenuse") ? 4 : 2.5}
 				opacity={isHl("hypotenuse") ? 1 : 0.45}
 			/>
@@ -221,13 +288,22 @@
 	<!-- Live Equation Readout -->
 	<div
 		class="bg-card flex flex-wrap items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-all {hl.has('equation')
-			? 'ring-primary/50 ring-2'
+			? 'ring-foreground/25 ring-2'
 			: ''}"
 	>
-		<span class="text-blue-600 dark:text-blue-400">{a}² ({a2})</span>
-		<span class="text-muted-foreground">+</span>
-		<span class="text-emerald-600 dark:text-emerald-400">{b}² ({b2})</span>
-		<span class="text-muted-foreground">=</span>
-		<span class="text-amber-600 dark:text-amber-400">{cFmt}² ({c2})</span>
+		{#key eqKey}
+			{#each [
+				{ t: `${a}² (${a2})`, c: "text-blue-600 dark:text-blue-400" },
+				{ t: "+", c: "text-muted-foreground" },
+				{ t: `${b}² (${b2})`, c: "text-emerald-600 dark:text-emerald-400" },
+				{ t: "=", c: "text-muted-foreground" },
+				{ t: `${cFmt}² (${c2})`, c: "text-amber-600 dark:text-amber-400" },
+			] as term, ti}
+				<span
+					class="tabular-nums {term.c}"
+					in:fly|global={{ y: prefersReducedMotion.current ? 0 : 8, duration: prefersReducedMotion.current ? 0 : 420, delay: prefersReducedMotion.current ? 0 : ti * 110, easing: cubicOut }}
+				>{term.t}</span>
+			{/each}
+		{/key}
 	</div>
 </div>
